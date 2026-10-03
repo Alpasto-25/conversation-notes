@@ -32,6 +32,8 @@
 
 首次打开按引导自行配置 API。Windows 使用 DPAPI、Android 使用 Keystore 在本机加密保存 Key。Windows 的普通覆盖更新和卸载保留 `%LOCALAPPDATA%\ConversationNotes` 数据目录；Android 更新不要先卸载旧版，卸载或清除数据会删除记录和配置。Windows 应用、原网页版和手机数据分别保存，不自动同步。
 
+Windows 1.1.0 安装包已在同一 Release 更新，版本号不变：修复普通聊天及默认示例被误报“分析请求格式不正确”的原生请求校验问题。直接覆盖安装即可，不需要更改聊天格式或重新填写 Key。请核对更新后的 SHA256，并从 Release 说明中的修复源码链接获取对应源码；已有标签不重写。本次 Android 包未更新。详情见 [版本记录](CHANGELOG.md)。
+
 ## 免费软件与模型服务费用
 
 **本软件免费使用，不提供任何充值、代充、收款或支付功能，也不出售或赠送 API Key。**

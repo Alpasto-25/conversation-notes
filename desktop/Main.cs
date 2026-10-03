@@ -191,10 +191,13 @@ namespace ConversationNotes
             Dictionary<string, object> config = store.Read();
             string key = Json.Text(config, "apiKey"), provider = Json.Text(config, "provider", "typesafe");
             if (key.Length == 0) throw new ApiException(503, "请先在聊天设置中配置 API Key。");
-            object questions;
-            if (Json.Text(payload, "state").Length == 0 || !payload.TryGetValue("questions", out questions) || !(questions is Dictionary<string, object>))
+            object state, questions;
+            if (!payload.TryGetValue("state", out state) ||
+                !((state is string && !String.IsNullOrWhiteSpace((string)state)) ||
+                  (state is Dictionary<string, object> && ((Dictionary<string, object>)state).Count > 0)) ||
+                !payload.TryGetValue("questions", out questions) || !(questions is Dictionary<string, object>))
                 throw new ApiException(400, "分析请求格式不正确，请重试。");
-            string body = Json.Encode(new { state = Json.Text(payload, "state"), questions = questions, model = ConfigStore.Model(provider) });
+            string body = Json.Encode(new { state = state, questions = questions, model = ConfigStore.Model(provider) });
             if (Encoding.UTF8.GetByteCount(body) > 2000000) throw new ApiException(413, "聊天过长，请缩小范围。");
             using (CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
@@ -267,11 +270,11 @@ namespace ConversationNotes
         private readonly ConfigStore config;
         private readonly ModelClient model;
         private readonly ConcurrentDictionary<string, CancellationTokenSource> jobs = new ConcurrentDictionary<string, CancellationTokenSource>();
-        internal NotebookWindow(string dataRoot)
+        internal NotebookWindow(string dataRoot, HttpClient testingClient = null)
         {
             this.dataRoot = dataRoot;
             config = new ConfigStore(dataRoot);
-            model = new ModelClient(config);
+            model = new ModelClient(config, testingClient);
             Text = "对话手记";
             Size = new Size(1240, 850);
             MinimumSize = new Size(750, 560);

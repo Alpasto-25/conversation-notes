@@ -36,6 +36,12 @@ namespace ConversationNotes
                 { "questions", new Dictionary<string, object> { { "a", new { type = "noul", instructions = "Test" } } } }
             };
         }
+        private static Dictionary<string, object> StructuredPayload()
+        {
+            // Match the actual WebView message, including object state and instructions.
+            Dictionary<string, object> wire = Json.Decode("{\"id\":\"00000000-0000-0000-0000-000000000001\",\"method\":\"evaluate\",\"payload\":{\"state\":{\"relationship\":\"普通沟通\",\"messages\":[{\"id\":\"0\",\"sender\":\"other\",\"text\":\"你好\"},{\"id\":\"1\",\"sender\":\"self\",\"text\":\"收到\"}]},\"questions\":{\"a\":{\"type\":\"noul\",\"instructions\":{\"question\":\"Test\",\"continuation\":[]}}}}}");
+            return (Dictionary<string, object>)wire["payload"];
+        }
         private static async Task Run(string folder)
         {
             ConfigStore store = new ConfigStore(folder);
@@ -77,6 +83,32 @@ namespace ConversationNotes
             using (ModelClient client = new ModelClient(store, new HttpClient(handler)))
             {
                 Check(Json.Encode(await client.Evaluate(Payload(), CancellationToken.None)).Contains("offline-test"), "offline native transport");
+                Check(Json.Encode(await client.Evaluate(StructuredPayload(), CancellationToken.None)).Contains("offline-test"), "actual WebView structured analysis payload accepted");
+                foreach (string provider in new[] { "typesafe", "vercel", "openrouter" })
+                {
+                    store.Configure(Input(provider, TestKey));
+                    Dictionary<string, object> structured = StructuredPayload();
+                    handler.Run = async (request, token) => {
+                        Dictionary<string, object> sent = Json.Decode(await request.Content.ReadAsStringAsync());
+                        Check(request.RequestUri.AbsoluteUri == ModelClient.Endpoint(provider), "structured request provider endpoint");
+                        Check(Json.Text(sent, "model") == ConfigStore.Model(provider), "structured request provider model");
+                        Check(sent["state"] is Dictionary<string, object>, "state remains a JSON object, not a string");
+                        Check(Json.Encode(sent["state"]) == Json.Encode(structured["state"]), "all structured context fields preserved");
+                        Check(Json.Encode(sent["questions"]) == Json.Encode(structured["questions"]), "structured instructions preserved");
+                        return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"model\":\"offline-test\",\"answers\":{},\"usage\":{\"input_tokens\":0,\"output_tokens\":0}}") };
+                    };
+                    Check(Json.Encode(await client.Evaluate(structured, CancellationToken.None)).Contains("offline-test"), "structured analysis succeeds for provider");
+                }
+                store.Configure(Input("typesafe", TestKey));
+                int invalidCalls = 0;
+                handler.Run = (request, token) => { invalidCalls++; return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)); };
+                foreach (object invalidState in new object[] { null, "", "   ", 123, true, new object[0], new Dictionary<string, object>() })
+                {
+                    Dictionary<string, object> invalid = Payload();
+                    invalid["state"] = invalidState;
+                    Reject(() => client.Evaluate(invalid, CancellationToken.None).GetAwaiter().GetResult(), 400, "invalid state rejected locally");
+                }
+                Check(invalidCalls == 0, "invalid requests never reach transport");
                 handler.Run = (request, token) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent(TestKey) });
                 try { await client.Evaluate(Payload(), CancellationToken.None); throw new Exception("Expected 401"); }
                 catch (ApiException error) { Check(error.Status == 401 && !error.Message.Contains(TestKey), "provider errors do not leak bodies"); }
