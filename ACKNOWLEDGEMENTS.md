@@ -29,3 +29,9 @@
 Primary credit and special gratitude belong to **FerryCorleone and the Crush Monitor contributors**. The original project supplied the idea and implementation foundation for conversation parsing, structured Jev judgments, emotion/intention presentation, reply evaluation, and local deployment. Its excellent design and open-source work made this extension possible.
 
 This fork adds broader communication scenes, import/UI improvements, local Windows and Android packaging, onboarding, provider guidance, and verification. It does not claim independent authorship of the upstream project. The upstream MIT copyright and license remain intact. The original author is not responsible for this fork's changes or builds and has not been represented as endorsing them.
+
+## 第三方动效依赖 / Third-party animation dependencies
+
+文件夹动效使用 GSAP 3.15.0 与 @gsap/react 2.1.2，感谢 GreenSock / Webflow 的工作。两者遵循 [GSAP Standard License](https://gsap.com/standard-license)，**并非本项目的 MIT 许可**；打包代码保留各自的版权与许可注释。
+
+Folder animations use GSAP 3.15.0 and @gsap/react 2.1.2 under the GSAP Standard License, not this project's MIT license. Their copyright and license notices are retained in the bundled code. Credit belongs to GreenSock / Webflow.

@@ -19,10 +19,12 @@
     "export:source": "node scripts/export-source.mjs"
   },
   "dependencies": {
+    "@gsap/react": "^2.1.2",
     "@tanstack/react-virtual": "^3.14.13",
     "@typesafe-ai/sdk": "^0.6.0",
     "dotenv": "^16.4.0",
     "express": "^5.1.0",
+    "gsap": "^3.15.0",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

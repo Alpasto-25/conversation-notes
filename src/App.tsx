@@ -1,7 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useNotebooks } from "./useNotebooks";
 import { ConversationFolders } from "./ConversationFolders";
-import { emptyConversation } from "./notebooks";
+import { emptyConversation, type NotebookSummary } from "./notebooks";
 import { INTENTS, topIntents } from "../shared/intents";
 import { REPLY_RATINGS, replyRating } from "../shared/ratings";
 import { EMOTIONS, topEmotions } from "../shared/labels";
@@ -33,6 +33,7 @@ import {
   Download,
   FolderOpen,
   Pencil,
+  Trash2,
 } from "lucide-react";
 import { parseChat, toMessages, mergeMessages } from "../shared/parser";
 import {
@@ -77,7 +78,7 @@ function Modal({
           ref.current?.querySelectorAll<HTMLElement>(
             "button:not(:disabled),select,textarea,input,a[href],summary",
           ) || [],
-        );
+        ).filter((node) => !node.closest("[inert]") && node.getClientRects().length > 0);
         if (e.shiftKey && document.activeElement === nodes[0]) {
           e.preventDefault();
           nodes.at(-1)?.focus();
@@ -126,6 +127,9 @@ export default function App() {
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false), [editingNotebook, setEditingNotebook] = useState(false);
   const [editTitle, setEditTitle] = useState(""), [editContact, setEditContact] = useState("");
+  const [editScene, setEditScene] = useState<Relation>("general"), [trashOpen, setTrashOpen] = useState(false);
+  const [notebookDelete, setNotebookDelete] = useState<{ note: NotebookSummary; permanent: boolean } | null>(null);
+  const [messageDelete, setMessageDelete] = useState<Message | null>(null);
   const [importScene, setImportScene] = useState<Relation>("general"), [importTarget, setImportTarget] = useState<"new" | "append">("new"),
     [importTitle, setImportTitle] = useState("");
   const [raw, setRaw] = useState(""),
@@ -165,6 +169,9 @@ export default function App() {
   }, []);
   useEffect(() => {
     window.__notebookBack = () => {
+      if (messageDelete) { setMessageDelete(null); return true; }
+      if (notebookDelete) { setNotebookDelete(null); return true; }
+      if (trashOpen) { setTrashOpen(false); return true; }
       if (editingNotebook) { setEditingNotebook(false); return true; }
       if (libraryOpen) { setLibraryOpen(false); return true; }
       if (updatesOpen) { setUpdatesOpen(false); return true; }
@@ -193,7 +200,7 @@ export default function App() {
     return () => {
       delete window.__notebookBack;
     };
-  }, [overlap, importing, settings, detail, onboarding, updatesOpen, libraryOpen, editingNotebook]);
+  }, [overlap, importing, settings, detail, onboarding, updatesOpen, libraryOpen, editingNotebook, trashOpen, notebookDelete, messageDelete]);
   const scroller = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const virtual = useVirtualizer({
@@ -317,18 +324,43 @@ export default function App() {
   }
   async function createNotebook() { if (await notebooks.create()) resetViews(); }
   async function selectNotebook(id: string) { if (id === notebooks.active?.id) { setLibraryOpen(false); return; } if (await notebooks.select(id)) resetViews(); }
-  async function clear() { if (await notebooks.removeCurrent()) resetViews(); }
-  function editNotebook() {
-    setEditTitle(notebooks.active?.title || ""); setEditContact(notebooks.active?.contact || other); setEditingNotebook(true);
+  async function editNotebook(id = notebooks.active?.id) {
+    if (!id) return;
+    const note = id === notebooks.active?.id ? notebooks.active : await notebooks.select(id);
+    if (!note) return;
+    setLibraryOpen(false); setNotice("");
+    setEditTitle(note.title); setEditContact(note.contact); setEditScene(id === notebooks.active?.id ? relation : note.conversation.relation); setEditingNotebook(true);
+  }
+  function requestNotebookDelete(note: NotebookSummary, permanent = false) {
+    setLibraryOpen(false); setTrashOpen(false); setSettings(false); setNotebookDelete({ note, permanent });
+  }
+  async function confirmNotebookDelete() {
+    if (!notebookDelete) return;
+    const result = notebookDelete.permanent ? await notebooks.purge(notebookDelete.note.id) : await notebooks.recycle(notebookDelete.note.id);
+    if (!result) return;
+    setNotice(notebookDelete.permanent ? "已彻底删除这份手记，其他记录不受影响。" : "已移入回收站，可从对话文件夹恢复。其他记录不受影响。");
+    setNotebookDelete(null); setDetail(null);
+  }
+  async function confirmMessageDelete() {
+    if (!messageDelete || !await notebooks.deleteMessages([messageDelete.id])) return;
+    setMessageDelete(null); setDetail(null); setNotice("消息已删除。为避免使用已删除的上下文，该手记的旧分析已清除；需要时再点击继续分析。");
+  }
+  const openTrash = () => { setLibraryOpen(false); setTrashOpen(true); };
+  async function saveNotebookEdit() {
+    if (!await notebooks.rename(editTitle, editContact, editScene)) return;
+    setEditingNotebook(false); setNotice("名称与分类已保存，没有调用模型。新场景需要时可点击继续分析。");
   }
   const names = [...new Set(parsed.map((x) => x.speaker))];
   const canAppend = !!messages.length && role === self && names.every((name) => name === self || name === other) && importScene === relation;
   const libraryDisabled = !ready || switching || !!storageError;
+  const manageDisabled = libraryDisabled || busy;
+  const folderActions = { edit: (id: string) => void editNotebook(id), recycle: (note: NotebookSummary) => requestNotebookDelete(note),
+    trashCount: notebooks.trashItems.length, openTrash, manageDisabled };
   const importInvalid = busy || !!storageError || !role || !parsed.length || names.length > 2 || names.includes("未分配") || (!names.includes(role) && role !== "__self_absent__");
   const chosen = messages.find((m) => m.id === detail),
     result = detail ? a.lines[detail] : undefined;
   return (
-    <main className="app">
+    <main className={`app${isDesktop ? " desktop-app" : ""}`}>
       <div className="workspace">
         <section className="notebook" aria-label="对话分析">
           <nav className="chat-rail" aria-label="工作空间工具">
@@ -356,6 +388,7 @@ export default function App() {
             </button>
             <button disabled={libraryDisabled} onClick={() => void createNotebook()}><Plus size={18} /> 新建手记，保留旧记录</button>
             <ConversationFolders compact items={notebooks.items} activeId={notebooks.active?.id} disabled={libraryDisabled}
+              {...folderActions}
               select={(id) => void selectNotebook(id)} create={() => void createNotebook()} />
             <button
               disabled={!ready || busy}
@@ -478,7 +511,7 @@ export default function App() {
                   <ShieldCheck size={13} />
                   {storageError ? "保存异常" : "仅在本机保存"}
                 </span>
-                {messages.length > 0 && <button className="text-button organize-notebook" disabled={libraryDisabled} onClick={editNotebook}><Pencil size={13} /> 整理手记</button>}
+                <button className="text-button organize-notebook" disabled={manageDisabled} onClick={() => void editNotebook()}><Pencil size={13} /> 整理手记</button>
               </div>
               {updates.showReminder && <div className="update-reminder" role="status">
                 <span>有新的{isMobile ? "手机版" : isDesktop ? "电脑版" : "应用"}可下载</span>
@@ -699,6 +732,7 @@ export default function App() {
                             </div>
                           )}
                         </div>
+                        <button className="icon message-delete danger" aria-label={`删除第 ${i + 1} 条消息`} title="删除这条聊天消息" disabled={manageDisabled} onClick={() => setMessageDelete(m)}><Trash2 size={15} strokeWidth={1.75} /></button>
                       </div>
                     </div>
                   );
@@ -952,9 +986,10 @@ export default function App() {
           </button>
           <button
             className="secondary danger"
+            disabled={manageDisabled}
             onClick={() => {
-              setSettings(false);
-              setDetail("clear");
+              const note = notebooks.items.find((n) => n.id === notebooks.active?.id);
+              if (note) requestNotebookDelete(note);
             }}
           >
             删除当前手记
@@ -962,7 +997,7 @@ export default function App() {
           <p>
             已保存 {messages.length.toLocaleString()} 条聊天。记录保存在
             {isMobile ? "这部手机" : isDesktop ? "这台电脑的应用中" : "本机浏览器"}
-            ，重新打开后可继续；分析时只发送所需片段给模型服务。删除仅影响当前手记，不会删除其他对象的记录。
+            ，重新打开后可继续；分析时只发送所需片段给模型服务。整份手记删除后进入回收站，可以恢复。
           </p>
           <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>重新查看使用引导</button>
           <button className="secondary" onClick={() => { setSettings(false); setUpdatesOpen(true); }}>版本与更新 / Release 下载页</button>
@@ -970,26 +1005,39 @@ export default function App() {
         </Modal>
       )}
       {updatesOpen && <Modal title="版本与更新" close={() => setUpdatesOpen(false)}><UpdatesPage updates={updates} /></Modal>}
-      {detail === "clear" && (
-        <Modal title="删除当前手记？" close={() => setDetail(null)}>
-          <p>只删除「{notebooks.active?.title}」的原文和分析，其他手记不会受影响。此操作不可撤销。如只想换对象，请选择新建手记。</p>
-          <button className="primary" disabled={libraryDisabled} onClick={() => void clear()}>
-            确认删除当前手记
-          </button>
-          <button className="secondary" onClick={() => setDetail(null)}>
-            保留当前聊天
-          </button>
-        </Modal>
-      )}
+      {notebookDelete && <Modal title={notebookDelete.permanent ? "彻底删除手记？" : "删除手记？"} close={() => setNotebookDelete(null)}>
+        <p>「{notebookDelete.note.title}」共 {notebookDelete.note.count} 条聊天。
+          {notebookDelete.permanent ? "将永久删除原文、分析和草稿，无法恢复。" : "将移入回收站，原文、分析和草稿仍可恢复。"}其他手记不会受影响。</p>
+        <button className="primary danger" disabled={manageDisabled} onClick={() => void confirmNotebookDelete()}>{notebookDelete.permanent ? "确认彻底删除" : "移入回收站"}</button>
+        <button className="secondary" onClick={() => setNotebookDelete(null)}>取消，保留记录</button>
+      </Modal>}
+      {messageDelete && <Modal title="删除这条聊天消息？" close={() => setMessageDelete(null)}>
+        <blockquote>{messageDelete.text}</blockquote>
+        <p>单条消息删除后无法撤销。后续评分和历史记忆可能依赖这句话，因此会清除当前手记所有场景的分析、总览和趋势；其他消息、草稿与其他手记保留。不会自动重新分析或消耗额度。</p>
+        <button className="primary danger" disabled={manageDisabled} onClick={() => void confirmMessageDelete()}>确认删除这条消息</button>
+        <button className="secondary" onClick={() => setMessageDelete(null)}>取消，保留消息</button>
+      </Modal>}
+      {trashOpen && <Modal title="手记回收站" close={() => setTrashOpen(false)}>
+        <p>回收站不会调用模型，也不会自动清空。恢复会保留原文、所有场景分析和草稿；“彻底删除”才不可恢复。</p>
+        {!notebooks.trashItems.length && <p className="folder-empty">回收站为空</p>}
+        <div className="trash-list">{notebooks.trashItems.map((n) => <div className="trash-row" key={n.id}>
+          <div><strong>{n.title}</strong><small>{RELATIONS[n.relation]} · {n.contact} · {n.count} 条</small></div>
+          <button className="text-button" aria-label={`恢复手记：${n.title}`} disabled={manageDisabled} onClick={() => void notebooks.recover(n.id).then((restored) => { if (restored) setNotice("手记已恢复，原文和分析保留，没有调用模型。"); })}><RotateCcw size={15} />恢复</button>
+          <button className="icon danger" aria-label={`彻底删除手记：${n.title}`} title="彻底删除" disabled={manageDisabled} onClick={() => requestNotebookDelete(n, true)}><Trash2 size={15} /></button>
+        </div>)}</div>
+        <button className="secondary" onClick={() => { setTrashOpen(false); setLibraryOpen(true); }}>返回对话文件夹</button>
+      </Modal>}
       {libraryOpen && <Modal title="对话文件夹" close={() => setLibraryOpen(false)}>
         <ConversationFolders items={notebooks.items} activeId={notebooks.active?.id} disabled={libraryDisabled}
+          {...folderActions}
           select={(id) => void selectNotebook(id)} create={() => void createNotebook()} />
       </Modal>}
       {editingNotebook && <Modal title="整理当前手记" close={() => setEditingNotebook(false)}>
         <label className="field">手记名称<input aria-label="手记名称" maxLength={100} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /></label>
         <label className="field">聊天对象分类<input aria-label="聊天对象分类" maxLength={80} value={editContact} onChange={(e) => setEditContact(e.target.value)} /></label>
-        <p>归入「{RELATIONS[relation]} → {editContact || other}」。这里只修改分类名称，不改原文和分析，也不调用模型。</p>
-        <button className="primary" disabled={libraryDisabled || !editTitle.trim() || !editContact.trim()} onClick={() => { notebooks.rename(editTitle, editContact); setEditingNotebook(false); }}>保存名称与分类</button>
+        <label className="field">场景分类<select aria-label="手记场景分类" value={editScene} onChange={(e) => setEditScene(e.target.value as Relation)}>{Object.entries(RELATIONS).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label>
+        <p>归入「{RELATIONS[editScene]} → {editContact || other}」。修改名称不改原文和分析；更换场景保留旧场景结果，不自动分析。</p>
+        <button className="primary" disabled={manageDisabled || !editTitle.trim() || !editContact.trim()} onClick={() => void saveNotebookEdit()}>保存名称与分类</button>
       </Modal>}
       {detail && detail !== "clear" && (
         <Modal

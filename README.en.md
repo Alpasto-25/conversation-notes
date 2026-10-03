@@ -24,6 +24,8 @@ Windows requires Windows 10 1809 / Windows 11 and [WebView2 Runtime](https://dev
 
 Conversation folders group separate notebooks by scene and person. Creating a notebook keeps previous records; switching restores saved text and analysis without model calls. Imports can also be saved without analysis.
 
+Organize names, contacts and scenes, sort notebooks, and keep collapsed-group preferences. Deleted notebooks go to a recoverable recycle bin. Single-message deletion requires confirmation and clears analysis that could depend on the removed context, without automatically rerunning it. The desktop layout expands with a maximized window.
+
 WeChat, QQ, and common WhatsApp text formats are supported. For other sources, use:
 
 ```text

@@ -64,16 +64,17 @@ export function createNotebookStore(factory?: IDBFactory) {
     return operation;
   }
   return {
-    loadLibrary: () => transaction<{ items: NotebookSummary[]; active?: Notebook }>("readwrite", (tx, result) => {
+    loadLibrary: () => transaction<{ items: NotebookSummary[]; trash: NotebookSummary[]; active?: Notebook }>("readwrite", (tx, result) => {
       const all = tx.objectStore("notebooks").getAll();
       const active = tx.objectStore("workspace").get("activeId");
       const finish = () => {
         if (all.readyState !== "done" || active.readyState !== "done") return;
-        const notes = (all.result as Notebook[]).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        const stored = (all.result as Notebook[]).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        const notes = stored.filter((n) => !n.deletedAt), trash = stored.filter((n) => !!n.deletedAt);
         if (!notes.length) { const note = newNotebook(); tx.objectStore("notebooks").put(note); notes.push(note); }
         const selected = notes.find((n) => n.id === active.result) ?? notes[0];
         if (active.result !== selected.id) tx.objectStore("workspace").put(selected.id, "activeId");
-        result({ items: notes.map(summarizeNotebook), active: selected });
+        result({ items: notes.map(summarizeNotebook), trash: trash.map(summarizeNotebook), active: selected });
       };
       all.onsuccess = finish; active.onsuccess = finish;
     }),
@@ -81,15 +82,38 @@ export function createNotebookStore(factory?: IDBFactory) {
       const req = tx.objectStore("notebooks").get(id);
       req.onsuccess = () => result(req.result);
     }),
-    save: (note: Notebook, activate = false) => transaction<void>("readwrite", (tx) => {
-      tx.objectStore("notebooks").put(note);
-      if (activate) tx.objectStore("workspace").put(note.id, "activeId");
+    save: (note: Notebook, activate = false) => transaction<boolean>("readwrite", (tx, result) => {
+      const notes = tx.objectStore("notebooks"), existing = notes.get(note.id);
+      existing.onsuccess = () => {
+        // A delayed autosave must not resurrect a recycled notebook or overwrite its contents.
+        if ((existing.result as Notebook | undefined)?.deletedAt) { result(false); return; }
+        notes.put(note);
+        if (activate) tx.objectStore("workspace").put(note.id, "activeId");
+        result(true);
+      };
     }),
     select: (id: string) => transaction<void>("readwrite", (tx) => { tx.objectStore("workspace").put(id, "activeId"); }),
     remove: (id: string) => transaction<void>("readwrite", (tx) => {
       tx.objectStore("notebooks").delete(id);
       const workspace = tx.objectStore("workspace"), active = workspace.get("activeId");
       active.onsuccess = () => { if (active.result === id) workspace.delete("activeId"); };
+    }),
+    recycle: (id: string) => transaction<void>("readwrite", (tx) => {
+      const notes = tx.objectStore("notebooks"), req = notes.get(id), workspace = tx.objectStore("workspace");
+      req.onsuccess = () => {
+        const note = req.result as Notebook | undefined;
+        if (note && !note.deletedAt) notes.put({ ...note, deletedAt: new Date().toISOString() });
+      };
+      const active = workspace.get("activeId");
+      active.onsuccess = () => { if (active.result === id) workspace.delete("activeId"); };
+    }),
+    recover: (id: string) => transaction<void>("readwrite", (tx) => {
+      const notes = tx.objectStore("notebooks"), req = notes.get(id);
+      req.onsuccess = () => {
+        const note = req.result as Notebook | undefined;
+        if (!note?.deletedAt) return;
+        delete note.deletedAt; notes.put(note);
+      };
     }),
     close: async () => { await queue.catch(() => {}); if (connection) (await connection).close(); connection = undefined; },
   };

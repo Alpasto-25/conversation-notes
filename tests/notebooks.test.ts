@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { IDBFactory } from "fake-indexeddb";
 import { createNotebookStore, type SavedConversation } from "../src/storage";
-import { newNotebook, emptyConversation, conversationInScene, summarizeNotebook } from "../src/notebooks";
+import { newNotebook, emptyConversation, conversationInScene, summarizeNotebook, organizeNotebook, withoutMessages } from "../src/notebooks";
 
 function fixture(other = "Alex"): SavedConversation {
   return { ...emptyConversation("friend"), self: "Me", other,
@@ -107,4 +107,56 @@ test("old scene results are not applied to changed original messages, roles or r
   }
   const note = newNotebook(fixture()); note.scenes.friend = { ...fixture(), rubric: "old-rubric" };
   assert.equal(conversationInScene(note, "friend").overview, null);
+});
+test("recycle and recover preserve original text, every scene, results, timestamps and draft", async () => {
+  const factory = new IDBFactory(), store = createNotebookStore(factory);
+  const a = newNotebook(fixture(), "朋友约定"), b = newNotebook(fixture("Sam"));
+  a.draft = "未分析的草稿"; a.scenes.family = { ...fixture(), relation: "family" };
+  await store.save(a, true); await store.save(b, true); await store.select(a.id);
+  await store.recycle(a.id);
+  const library = await store.loadLibrary();
+  assert.equal(library.items.length, 1); assert.equal(library.active!.id, b.id); assert.equal(library.trash[0].id, a.id);
+  assert.deepEqual((await store.load(a.id))!.conversation, a.conversation);
+  await store.close(); const reopened = createNotebookStore(factory);
+  assert.equal((await reopened.loadLibrary()).trash.length, 1);
+  await reopened.recover(a.id); assert.deepEqual(await reopened.load(a.id), a);
+  assert.equal((await reopened.loadLibrary()).active!.id, b.id); await reopened.close();
+});
+test("late autosaves never resurrect or overwrite a recycled notebook", async () => {
+  const store = createNotebookStore(new IDBFactory()), a = newNotebook(fixture()); await store.save(a, true);
+  await store.recycle(a.id); await store.save({ ...a, title: "late save", draft: "stale" }, true);
+  const library = await store.loadLibrary(); assert.equal(library.trash[0].title, a.title);
+  assert.notEqual(library.active!.id, a.id); await store.recover(a.id);
+  assert.deepEqual(await store.load(a.id), a); await store.close();
+});
+test("recycling the last notebook creates one blank notebook without losing the recycled record", async () => {
+  const store = createNotebookStore(new IDBFactory()), a = newNotebook(fixture()); await store.save(a, true);
+  await store.recycle(a.id);
+  const [one, two] = await Promise.all([store.loadLibrary(), store.loadLibrary()]);
+  assert.equal(one.items.length, 1); assert.equal(one.trash.length, 1); assert.equal(one.active!.id, two.active!.id);
+  await store.close();
+});
+test("permanent deletion removes only its specific recycled notebook", async () => {
+  const store = createNotebookStore(new IDBFactory()), a = newNotebook(fixture()), b = newNotebook(fixture("Sam"));
+  await store.save(a, true); await store.save(b, true); await store.recycle(a.id); await store.remove(a.id);
+  assert.equal(await store.load(a.id), undefined); assert.deepEqual(await store.load(b.id), b);
+  assert.equal((await store.loadLibrary()).trash.length, 0); await store.close();
+});
+test("organizing names and scenes never alters original messages and retains prior scene results", () => {
+  const a = newNotebook(fixture());
+  const moved = organizeNotebook(a, "工作方案", "同事 Alex", "colleague");
+  assert.deepEqual(moved.conversation.messages, a.conversation.messages); assert.equal(moved.conversation.completed, false);
+  assert.deepEqual(moved.scenes.friend, a.conversation);
+  const returned = organizeNotebook(moved, "朋友约定", "好友 Alex", "friend");
+  assert.deepEqual(returned.conversation, a.conversation); assert.equal(returned.conversation.completed, true);
+});
+test("single-message deletion invalidates all derived analysis and memory but preserves other messages and drafts", () => {
+  const a = newNotebook(fixture()); a.draft = "保留草稿"; a.scenes.family = { ...fixture(), relation: "family" };
+  const next = withoutMessages(a, ["two"]);
+  assert.equal(next.conversation.messages.length, 1); assert.equal(next.conversation.messages[0].id, "one");
+  assert.equal(next.draft, a.draft); assert.equal(next.title, a.title); assert.equal(next.contact, a.contact);
+  assert.deepEqual(next.conversation.lines, {}); assert.deepEqual(next.conversation.events, {});
+  assert.deepEqual(next.conversation.trend, []); assert.equal(next.conversation.overview, null);
+  assert.equal(next.conversation.analyzedCount, 0); assert.equal(next.conversation.completed, false); assert.deepEqual(next.scenes, {});
+  assert.equal(withoutMessages(a, ["missing"]), a); assert.equal(a.conversation.messages.length, 2);
 });
