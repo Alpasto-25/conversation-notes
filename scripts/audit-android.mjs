@@ -16,7 +16,7 @@ let end = apk.length - 22;
 while (end >= Math.max(0, apk.length - 65557) && apk.readUInt32LE(end) !== 0x06054b50) end--;
 if (end < 0) throw new Error('Invalid APK archive');
 const entries = apk.readUInt16LE(end + 10);
-let cursor = apk.readUInt32LE(end + 16), checked = 0, officialLinks;
+let cursor = apk.readUInt32LE(end + 16), checked = 0, officialLinks, license, acknowledgements;
 for (let index = 0; index < entries; index++) {
   if (apk.readUInt32LE(cursor) !== 0x02014b50) throw new Error('Invalid ZIP directory');
   const method = apk.readUInt16LE(cursor + 10);
@@ -33,6 +33,8 @@ for (let index = 0; index < entries; index++) {
   const content = method === 8 ? inflateRawSync(compressed) : method === 0 ? compressed : null;
   if (!content) throw new Error('Unsupported ZIP entry');
   if (name === 'assets/official-links.json') officialLinks = JSON.parse(content.toString('utf8'));
+  if (name === 'assets/LICENSE.txt') license = content.toString('utf8');
+  if (name === 'assets/ACKNOWLEDGEMENTS.md') acknowledgements = content.toString('utf8');
   if (secrets.some(secret => content.includes(Buffer.from(secret)))) throw new Error('Secret audit failed (contents not printed)');
   if (name.startsWith('assets/www/') && /127\.0\.0\.1:3178|localhost:3178/.test(content.toString('utf8')))
     throw new Error('Phone assets depend on the desktop server');
@@ -40,4 +42,6 @@ for (let index = 0; index < entries; index++) {
   cursor += 46 + nameLength + extraLength + commentLength;
 }
 assert.deepEqual(officialLinks, OFFICIAL_PROVIDER_URLS, 'Packaged provider links must match the fixed official allowlist');
+assert.equal(license, await readFile(join(root, 'LICENSE'), 'utf8'), 'APK must preserve the complete upstream MIT license');
+assert.equal(acknowledgements, await readFile(join(root, 'ACKNOWLEDGEMENTS.md'), 'utf8'), 'APK must include original-author acknowledgements');
 console.log(`APK audit passed: ${checked} extracted entries, no configured key or .env included, no desktop-server dependency.`);

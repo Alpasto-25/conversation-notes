@@ -28,6 +28,8 @@ try {
     }
     & node --import tsx scripts/export-provider-links.ts (Join-Path $BuildRoot 'assets')
     Assert-ToolSuccess 'Official provider link allowlist'
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot 'LICENSE') -Destination (Join-Path $BuildRoot 'assets\LICENSE.txt')
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot 'ACKNOWLEDGEMENTS.md') -Destination (Join-Path $BuildRoot 'assets\ACKNOWLEDGEMENTS.md')
     Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'dist-mobile') | Copy-Item -Destination (Join-Path $BuildRoot 'assets\www') -Recurse -Force
     & (Join-Path $BuildTools 'aapt2.exe') compile --dir (Join-Path $PSScriptRoot 'res') -o (Join-Path $BuildRoot 'compiled.zip')
     Assert-ToolSuccess 'Android resources'
