@@ -16,6 +16,7 @@ import {
   type AnalysisResponse,
 } from "../shared/types";
 import type { SavedConversation, Trend } from "./storage";
+import { analysisFetch } from "./platform";
 const pause = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     const timer = setTimeout(done, ms);
@@ -156,12 +157,7 @@ export function useAnalysis() {
     async function execute(job: AnalysisRequest) {
       let data: AnalysisResponse | undefined;
       for (let attempt = 0; attempt < 4; attempt++) {
-        const response = await fetch("/api/analyze", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(job),
-          signal: ctrl.signal,
-        });
+        const response = await analysisFetch(job, ctrl.signal);
         if ([429, 529].includes(response.status) && attempt < 3) {
           await pause(
             Math.min(

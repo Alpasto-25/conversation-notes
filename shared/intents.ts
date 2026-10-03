@@ -125,6 +125,27 @@ export const INTENTS = {
     label: "结束聊天",
     criteria: "明确或含蓄表示本次对话先结束、自己要忙或休息",
   },
+  coordinate: {
+    label: "协调分工",
+    criteria: "协商谁来做什么、配合方式或资源分配，重点是共同完成一件事",
+  },
+  requirement: {
+    label: "说明需求",
+    criteria: "明确提出期待、要求或验收条件，区别于一般询问和情绪倾诉",
+  },
+  negotiate: {
+    label: "协商条件",
+    criteria:
+      "围绕价格、范围、时间或其他条件提出调整与折中，不自动表示合作已达成",
+  },
+  followup: {
+    label: "跟进进展",
+    criteria: "追问已有任务、承诺或安排的进展，希望确认是否按约推进",
+  },
+  commit: {
+    label: "承诺行动",
+    criteria: "明确答应承担具体行动或责任，有可见承诺而非模糊的客套",
+  },
   other: {
     label: "其他意图",
     criteria: "能看出沟通目的，但不属于上述任何一类",

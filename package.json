@@ -6,6 +6,11 @@
   "scripts": {
     "dev": "concurrently -k -n api,web \"tsx watch server/index.ts\" \"vite --host 127.0.0.1\"",
     "build": "tsc --noEmit && vite build",
+    "build:mobile": "tsc --noEmit && vite build --mode mobile",
+    "build:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1",
+    "test:desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1 -TestOnly",
+    "build:android": "powershell -NoProfile -ExecutionPolicy Bypass -File android/build.ps1",
+    "install:android": "powershell -NoProfile -ExecutionPolicy Bypass -File android/build.ps1 -Install",
     "start": "tsx server/index.ts",
     "test": "tsx --test tests/*.test.ts",
     "check:live": "tsx scripts/check-live.ts",
@@ -37,7 +42,7 @@
     "vite": "^6.3.0"
   },
   "license": "MIT",
-  "description": "Local-first WeChat-style conversation analysis powered by your own Jev API key",
+  "description": "Local-first conversation notebook for desktop and Android, powered by your own Jev API key",
   "engines": {
     "node": ">=22.12.0"
   }

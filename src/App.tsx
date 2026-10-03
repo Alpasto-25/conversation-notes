@@ -24,23 +24,36 @@ import {
   Settings2,
   Plus,
   ArrowRight,
-  Send,
   Check,
+  NotebookPen,
+  FileText,
+  Upload,
+  ShieldCheck,
+  ChevronRight,
+  BookOpen,
+  Sparkles,
 } from "lucide-react";
 import { parseChat, toMessages, mergeMessages } from "../shared/parser";
 import {
   RUBRIC,
   ACTIONS,
   RELATIONS,
+  STAGES,
+  isRomantic,
+  metricLabel,
   statusLabel,
   meanQuality,
   type Message,
   type Relation,
   type Parsed,
 } from "../shared/types";
-import { exampleText } from "../shared/fixtures";
+import { exampleForRelation } from "../shared/fixtures";
 import { useAnalysis } from "./useAnalysis";
-import { currentAction } from "../shared/action";
+import { isMobile, isDesktop, isNative, getApiStatus, type ApiStatus } from "./platform";
+import { MobileSettings } from "./MobileSettings";
+import { BillingNotice, ProviderHelp } from "./ProviderHelp";
+import { FirstRunGuide } from "./FirstRunGuide";
+import { markOnboardingSeen, shouldShowOnboarding } from "../shared/provider-guides";
 
 function Modal({
   title,
@@ -60,7 +73,7 @@ function Modal({
       if (e.key === "Tab") {
         const nodes = Array.from(
           ref.current?.querySelectorAll<HTMLElement>(
-            "button:not(:disabled),select,textarea,input",
+            "button:not(:disabled),select,textarea,input,a[href],summary",
           ) || [],
         );
         if (e.shiftKey && document.activeElement === nodes[0]) {
@@ -107,8 +120,8 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]),
     [input, setInput] = useState(""),
     [self, setSelf] = useState(""),
-    [other, setOther] = useState("Crush"),
-    [relation, setRelation] = useState<Relation>("crush");
+    [other, setOther] = useState("对方"),
+    [relation, setRelation] = useState<Relation>("general");
   const [raw, setRaw] = useState(""),
     [parsed, setParsed] = useState<Parsed[]>([]),
     [role, setRole] = useState(""),
@@ -119,7 +132,63 @@ export default function App() {
   const [overlap, setOverlap] = useState<Message[] | null>(null);
   const [ready, setReady] = useState(false),
     [storageError, setStorageError] = useState("");
+  const [apiInfo, setApiInfo] = useState<ApiStatus | null>(null);
+  const [onboarding, setOnboarding] = useState(() => {
+    try { return shouldShowOnboarding(window.localStorage); }
+    catch { return true; }
+  });
+  const finishGuide = () => {
+    try { markOnboardingSeen(window.localStorage); } catch { /* Keep the guide dismissible. */ }
+    setOnboarding(false);
+  };
+  useEffect(() => {
+    let live = true;
+    const refresh = () => {
+      void getApiStatus()
+        .then((status) => {
+          if (live) setApiInfo(status);
+        })
+        .catch(() => {
+          if (live) setApiInfo({ configured: false });
+        });
+    };
+    refresh();
+    window.addEventListener("notebook-config-changed", refresh);
+    return () => {
+      live = false;
+      window.removeEventListener("notebook-config-changed", refresh);
+    };
+  }, []);
+  useEffect(() => {
+    window.__notebookBack = () => {
+      if (onboarding) {
+        finishGuide();
+        return true;
+      }
+      if (overlap) {
+        setOverlap(null);
+        return true;
+      }
+      if (importing) {
+        setImporting(false);
+        return true;
+      }
+      if (settings) {
+        setSettings(false);
+        return true;
+      }
+      if (detail) {
+        setDetail(null);
+        return true;
+      }
+      return false;
+    };
+    return () => {
+      delete window.__notebookBack;
+    };
+  }, [overlap, importing, settings, detail, onboarding]);
   const scroller = useRef<HTMLDivElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const virtual = useVirtualizer({
     count: messages.length,
     getScrollElement: () => scroller.current,
@@ -141,6 +210,10 @@ export default function App() {
           setOther(saved.other);
           setRelation(saved.relation);
           a.restore(saved);
+          if (saved.rubric !== RUBRIC)
+            setNotice(
+              "对话已保留，分析规则已更新。请选择场景，再点击继续分析。旧评分需要重新计算。",
+            );
         }
         setReady(true);
       })
@@ -225,14 +298,8 @@ export default function App() {
     ov = a.overview,
     value = ov?.affinity.value,
     quality = meanQuality(messages, a.lines);
-  const actionOverview = currentAction(ov, messages, a.overviewFresh);
-  const actionLabel = actionOverview
-    ? ACTIONS[actionOverview.action]?.label
-    : busy
-      ? "正在更新…"
-      : messages.length
-        ? "建议待更新"
-        : "等你导入聊天";
+  const romantic = isRomantic(relation),
+    metric = metricLabel(relation);
   const last = a.trend.at(-1),
     previous = a.trend.at(-2);
   const delta =
@@ -243,6 +310,36 @@ export default function App() {
     setMessages(ms);
     setInput("");
     a.run(ms, relation);
+  }
+  function changeRelation(next: Relation) {
+    if (next === relation) return;
+    setRelation(next);
+    a.reset();
+    setNotice(
+      messages.length
+        ? "场景已更换，对话已保留。点击继续分析，按新场景重新评价。"
+        : "",
+    );
+  }
+  async function importFile(file: File) {
+    if (file.size > 1000000) {
+      setNotice("文本文件超过 1 MB，请分成较小的片段导入。");
+      return;
+    }
+    try {
+      const text = await file.text();
+      if (text.includes("\uFFFD")) {
+        setNotice("文件编码无法完整读取，请另存为 UTF-8 文本后再导入。");
+        return;
+      }
+      if (!text.trim()) {
+        setNotice("这个文件没有可读取的文字。");
+        return;
+      }
+      prepare(text);
+    } catch {
+      setNotice("文本文件读取失败，请重试或直接粘贴内容。");
+    }
   }
   function add(ms: Message[], mode: "auto" | "append" | "skip" = "auto") {
     const m = mergeMessages(messages, ms, mode);
@@ -283,7 +380,7 @@ export default function App() {
   function confirmImport() {
     const names = [...new Set(parsed.map((x) => x.speaker))];
     setSelf(role);
-    setOther(names.find((n) => n !== role) || "Crush");
+    setOther(names.find((n) => n !== role) || "对方");
     setImporting(false);
     add(toMessages(parsed, role));
   }
@@ -298,7 +395,7 @@ export default function App() {
     setMessages([]);
     setInput("");
     setSelf("");
-    setOther("Crush");
+    setOther("对方");
     setNotice("");
     setSettings(false);
     setDetail(null);
@@ -309,11 +406,18 @@ export default function App() {
   return (
     <main className="app">
       <div className="workspace">
-        <section className="wechat" aria-label="微信聊天">
-          <nav className="chat-rail" aria-label="聊天工具">
-            <div className="rail-avatar">
-              {self && self !== "__self_absent__" ? self.slice(0, 1) : "我"}
+        <section className="notebook" aria-label="对话分析">
+          <nav className="chat-rail" aria-label="工作空间工具">
+            <div className="brand">
+              <span className="brand-mark">
+                <NotebookPen size={24} strokeWidth={1.8} />
+              </span>
+              <div>
+                <strong>对话手记</strong>
+                <span>Conversation Notes</span>
+              </div>
             </div>
+            <span className="rail-label">我的工作空间</span>
             <button
               className="rail-active"
               aria-label="滚动到最新聊天"
@@ -323,45 +427,68 @@ export default function App() {
                   virtual.scrollToIndex(messages.length - 1, { align: "end" });
               }}
             >
-              <MessageCircle size={23} />
+              <MessageCircle size={18} /> 当前对话
+              <span className="nav-count">{messages.length || "01"}</span>
             </button>
             <button
-              className="rail-settings"
-              aria-label="聊天设置"
-              onClick={() => setSettings(true)}
+              disabled={!ready || busy}
+              onClick={() => fileInput.current?.click()}
             >
-              <Settings2 size={22} />
+              <Upload size={18} /> 导入记录
             </button>
+            <button
+              onClick={() => prepare(exampleForRelation(relation))}
+              disabled={busy}
+            >
+              <BookOpen size={18} /> 试试一段示例
+            </button>
+            <span className="rail-label rail-label-second">工具与帮助</span>
+            <button onClick={() => setOnboarding(true)}><BookOpen size={18} /> 使用引导</button>
+            <button onClick={() => setDetail("overview")}>
+              <Sparkles size={18} /> 查看分析解读
+            </button>
+            <button onClick={() => setDetail("formats")}>
+              <FileText size={18} /> 支持的格式
+            </button>
+            <button aria-label="聊天设置" onClick={() => setSettings(true)}>
+              <Settings2 size={18} /> 分析设置
+            </button>
+            <div className="rail-note">
+              <span className="note-eyebrow">A LITTLE MORE UNDERSTANDING</span>
+              <p>
+                留住对话，
+                <br />
+                也留一点思考的空间。
+              </p>
+              <span>不猜内心，只看有据可循的线索。</span>
+            </div>
+            <div className="rail-footer">
+              <ShieldCheck size={17} />
+              <div>
+                <strong>本机保存</strong>
+                <span>由你决定分享什么</span>
+              </div>
+            </div>
           </nav>
           <header className="chat-head">
-            <div className="contact-title">
-              <h2>{messages.length ? other : "微信聊天"}</h2>
-              <span>{RELATIONS[relation]}</span>
+            <div className="breadcrumb">
+              <NotebookPen size={17} />
+              <span>{isMobile ? "手机工作空间" : "私人工作空间"}</span>
+              <ChevronRight size={13} />
+              <strong>对话手记</strong>
             </div>
-            <button
-              className="header-affinity"
-              onClick={() => setDetail("overview")}
-              aria-label="查看好感度详情"
-            >
-              <span>好感度</span>
-              <strong key={value} className="affinity-number">
-                {value ?? "—"}
-              </strong>
-              {value != null && (
-                <span className="affinity-hearts" aria-hidden="true">
-                  <Heart className="affinity-heart heart-one" size={12} />
-                  <Heart className="affinity-heart heart-two" size={9} />
-                  <Heart className="affinity-heart heart-three" size={7} />
-                </span>
-              )}
-              {delta != null && delta !== 0 && (
-                <small>
-                  {delta > 0 ? "+" : ""}
-                  {delta}
-                </small>
-              )}
-            </button>
             <div className="header-tools">
+              <button
+                className={`api-badge ${apiInfo?.configured ? "configured" : ""}`}
+                onClick={() => setSettings(true)}
+              >
+                <span />
+                {apiInfo == null
+                  ? "连接中"
+                  : apiInfo.configured
+                    ? "API 已配置"
+                    : "配置 API"}
+              </button>
               <button
                 className="icon"
                 aria-label="新聊天"
@@ -375,10 +502,80 @@ export default function App() {
                 aria-label="更多聊天设置"
                 onClick={() => setSettings(true)}
               >
-                <MoreHorizontal size={24} />
+                <MoreHorizontal size={22} />
               </button>
             </div>
           </header>
+          <div className="document-head">
+            <div className="document-title">
+              <div className="page-eyebrow">
+                YOUR CONVERSATION, A NEW PERSPECTIVE
+              </div>
+              <h1>
+                {messages.length ? (
+                  `${other}的对话手记`
+                ) : (
+                  <>
+                    让对话，多一点<span className="title-highlight">理解</span>
+                    。
+                  </>
+                )}
+              </h1>
+              <p>
+                {messages.length
+                  ? `${messages.length.toLocaleString()} 条记录 · 保留原话，结合上下文阅读`
+                  : "从日常聊天到工作沟通，看见情绪、表达和下一步。"}
+              </p>
+              <div className="document-meta">
+                <label className="scene-control">
+                  <span>分析场景</span>
+                  <select
+                    className="scene-select"
+                    aria-label="分析场景"
+                    value={relation}
+                    onChange={(e) => changeRelation(e.target.value as Relation)}
+                  >
+                    {Object.entries(RELATIONS).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <span className="save-badge">
+                  <ShieldCheck size={13} />
+                  {storageError ? "保存异常" : "仅在本机保存"}
+                </span>
+              </div>
+            </div>
+            <button
+              className="header-affinity"
+              onClick={() => setDetail("overview")}
+              aria-label={`查看${metric}详情`}
+            >
+              <span>{metric}</span>
+              <strong key={value} className="affinity-number">
+                {value ?? "—"}
+              </strong>
+              <span className="metric-scale">/ 100</span>
+              {value != null && romantic && (
+                <span className="affinity-hearts" aria-hidden="true">
+                  <Heart className="affinity-heart heart-one" size={12} />
+                  <Heart className="affinity-heart heart-two" size={9} />
+                  <Heart className="affinity-heart heart-three" size={7} />
+                </span>
+              )}
+              {delta != null && delta !== 0 && (
+                <small>
+                  {delta > 0 ? "+" : ""}
+                  {delta}
+                </small>
+              )}
+              <span className="metric-detail">
+                查看维度 <ArrowUpRight size={13} />
+              </span>
+            </button>
+          </div>
           <div
             ref={scroller}
             className="chat-scroll"
@@ -390,13 +587,49 @@ export default function App() {
           >
             {!messages.length ? (
               <div className="empty">
-                <h2>粘贴聊天记录</h2>
-                <p>支持微信、QQ 复制记录及 WhatsApp 文本导出</p>
+                <div className="empty-illustration" aria-hidden="true">
+                  <span className="sketch-note">
+                    <FileText size={38} strokeWidth={1.5} />
+                    <i />
+                  </span>
+                  <span className="sketch-chat">
+                    <MessageCircle size={28} strokeWidth={1.6} />
+                  </span>
+                  <span className="sketch-spark">
+                    <Sparkles size={23} strokeWidth={1.8} />
+                  </span>
+                </div>
+                <div className="empty-eyebrow">
+                  每一段交流，都值得认真读一读
+                </div>
+                <h2>从一段对话开始</h2>
+                <p>
+                  选好场景，粘贴文字或导入记录。
+                  <br />
+                  手记会帮你梳理沟通中的线索。
+                </p>
+                <div className="getting-started">
+                  <span>
+                    <b>1</b>选择场景
+                  </span>
+                  <ChevronRight size={13} />
+                  <span>
+                    <b>2</b>导入对话
+                  </span>
+                  <ChevronRight size={13} />
+                  <span>
+                    <b>3</b>看看解读
+                  </span>
+                </div>
+                <p className="source-hint">
+                  微信 · QQ · WhatsApp · 其他双人文字对话
+                </p>
                 <button
                   className="text-button"
-                  onClick={() => prepare(exampleText(0))}
+                  onClick={() => prepare(exampleForRelation(relation))}
                 >
-                  用一段示例试试 <ArrowUpRight size={16} />
+                  <BookOpen size={16} /> 用一段示例试试{" "}
+                  <ArrowUpRight size={15} />
                 </button>
               </div>
             ) : (
@@ -540,7 +773,7 @@ export default function App() {
               className="reply-summary"
               onClick={() => setDetail("performance")}
             >
-              <span>我的发挥</span>
+              <span>我的表达</span>
               <strong>{replyRating(quality)?.label ?? "—"}</strong>
               {quality != null && <span>{quality}分</span>}
             </button>
@@ -550,18 +783,45 @@ export default function App() {
               onClick={() => setDetail("action")}
             >
               <span>下一步</span>
-              <strong>{actionLabel}</strong>
+              <strong>{ov ? ACTIONS[ov.action]?.label : "等你导入聊天"}</strong>
               <ArrowRight size={14} />
             </button>
           </div>
           <div className="composer">
+            <div className="import-toolbar">
+              <input
+                ref={fileInput}
+                type="file"
+                accept=".txt,.md,.log,text/plain"
+                aria-label="选择对话文本文件"
+                hidden
+                onChange={(e) => {
+                  const file = e.currentTarget.files?.[0];
+                  e.currentTarget.value = "";
+                  if (file) void importFile(file);
+                }}
+              />
+              <button
+                className="text-button"
+                disabled={!ready || busy}
+                onClick={() => fileInput.current?.click()}
+              >
+                <Upload size={15} /> 导入文本文件
+              </button>
+              <button
+                className="text-button"
+                onClick={() => setDetail("formats")}
+              >
+                查看支持格式
+              </button>
+            </div>
             <textarea
               aria-label="粘贴聊天记录"
               disabled={!ready}
               placeholder={
                 messages.length
                   ? "粘贴新的聊天，自动合并重复记录"
-                  : "在这里粘贴聊天记录…"
+                  : "粘贴两人的对话，例如：我：内容 / 对方：内容…"
               }
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -601,7 +861,7 @@ export default function App() {
                       <Check size={14} />
                       分析完成
                       <button onClick={() => setDetail("overview")}>
-                        娱乐参考
+                        查看解读
                       </button>
                     </span>
                   ) : messages.length ? (
@@ -620,7 +880,7 @@ export default function App() {
                 disabled={!input.trim()}
                 onClick={() => prepare(input)}
               >
-                <Send size={15} />
+                <Sparkles size={15} />
                 分析聊天
               </button>
             </div>
@@ -629,6 +889,19 @@ export default function App() {
       </div>
       {importing && (
         <Modal title="确认聊天里的你" close={() => setImporting(false)}>
+          <label className="field">
+            本次分析场景
+            <select
+              value={relation}
+              onChange={(e) => changeRelation(e.target.value as Relation)}
+            >
+              {Object.entries(RELATIONS).map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="role-options">
             {names
               .filter((n) => n !== "未分配")
@@ -680,17 +953,29 @@ export default function App() {
           </button>
         </Modal>
       )}
+      {ready && onboarding && (
+        <Modal title="初次使用引导" close={finishGuide}>
+          <FirstRunGuide finish={finishGuide} configure={() => { finishGuide(); setSettings(true); }} />
+        </Modal>
+      )}
       {settings && (
         <Modal title="聊天设置" close={() => setSettings(false)}>
+          {isNative && <MobileSettings status={apiInfo} changed={setApiInfo} />}
+          {!isNative && (
+            <>
+            <p className="desktop-api-note">
+              <ShieldCheck size={16} /> 原网页版 API 配置保存在电脑的 .env
+              文件中，不会发送到浏览器。
+            </p>
+            <BillingNotice />
+            <ProviderHelp provider={apiInfo?.provider} expanded={!apiInfo?.configured} />
+            </>
+          )}
           <label className="field">
-            你们的关系
+            分析场景
             <select
               value={relation}
-              onChange={(e) => {
-                const r = e.target.value as Relation;
-                setRelation(r);
-                if (messages.length) a.run(messages, r);
-              }}
+              onChange={(e) => changeRelation(e.target.value as Relation)}
             >
               {Object.entries(RELATIONS).map(([k, v]) => (
                 <option value={k} key={k}>
@@ -699,6 +984,10 @@ export default function App() {
               ))}
             </select>
           </label>
+          <p>
+            场景会影响评分维度、回复评价和下一步建议。更换场景后点击继续分析，使用少量
+            API 额度。
+          </p>
           <button
             className="secondary"
             disabled={!messages.length}
@@ -718,13 +1007,21 @@ export default function App() {
           >
             交换双方身份
           </button>
-          <button className="secondary danger" onClick={clear}>
+          <button
+            className="secondary danger"
+            onClick={() => {
+              setSettings(false);
+              setDetail("clear");
+            }}
+          >
             清空聊天，重新开始
           </button>
           <p>
-            已保存 {messages.length.toLocaleString()}{" "}
-            条聊天。记录保存在本机浏览器，刷新后可继续；分析时只发送所需片段给模型服务。清空会删除本机记录。
+            已保存 {messages.length.toLocaleString()} 条聊天。记录保存在
+            {isMobile ? "这部手机" : isDesktop ? "这台电脑的应用中" : "本机浏览器"}
+            ，重新打开后可继续；分析时只发送所需片段给模型服务。清空会删除本机记录。
           </p>
+          <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>重新查看使用引导</button>
         </Modal>
       )}
       {detail === "clear" && (
@@ -742,25 +1039,44 @@ export default function App() {
         <Modal
           title={
             detail === "overview"
-              ? "好感度"
+              ? metric
               : detail === "action"
                 ? "下一步"
                 : detail === "performance"
-                  ? "我的发挥"
-                  : chosen?.sender === "other"
-                    ? "情绪与意图"
-                    : "回复评价"
+                  ? "我的表达"
+                  : detail === "formats"
+                    ? "支持的对话格式"
+                    : chosen?.sender === "other"
+                      ? "情绪与意图"
+                      : "回复评价"
           }
           close={() => setDetail(null)}
         >
           {detail === "overview" ? (
             <>
               <p>
-                0—100 是模型对这段聊天的好感信号评分，不是「对方喜欢你的概率」。
+                {romantic
+                  ? "0—100 是当前聊天的好感信号评分，不是对方喜欢你的概率。"
+                  : "0—100 是当前对话中回应、理解、尊重、支持、清晰表达和行动跟进的综合评分，不代表真实心理、亲密程度或合作成功率。"}
               </p>
               <p>
-                根据近期对话和相关历史原话评分，旧分数不参与计算。证据少时仍保留分数供娱乐参考。
+                按「{RELATIONS[relation]}
+                」场景，参考近期对话和相关历史原话评分。请结合证据充分程度阅读，不同场景的分数不宜直接比较。
               </p>
+              {ov && (
+                <p>
+                  {relation !== "couple" && (
+                    <>沟通进展：{STAGES[ov.stage] ?? "信息不足"}</>
+                  )}
+                  {ov.rapport && (
+                    <>
+                      {relation !== "couple" && " · "}理解与协调{" "}
+                      {ov.rapport.value ?? "—"}/100（
+                      {statusLabel(ov.rapport)}）
+                    </>
+                  )}
+                </p>
+              )}
               {!!ov?.memoryEvidenceIds?.length && (
                 <details>
                   <summary>参考的历史原话</summary>
@@ -796,7 +1112,7 @@ export default function App() {
               {ov?.boundaryApplied && (
                 <p>
                   对方表达了明确且仍有效的拒绝边界。综合原分{" "}
-                  {ov.affinityRawValue}，最终好感度最多显示 25 分。
+                  {ov.affinityRawValue}，最终好感信号最多显示 25 分。
                 </p>
               )}
               {ov && (
@@ -806,31 +1122,32 @@ export default function App() {
                 </p>
               )}
             </>
+          ) : detail === "formats" ? (
+            <>
+              <p>微信：电脑版多选复制的「昵称 → 时间 → 正文」格式。</p>
+              <p>QQ：昵称与时间在一行、正文在下一行的复制记录。</p>
+              <p>WhatsApp：导出的 .txt 文本，可直接导入文件或复制粘贴。</p>
+              <p>
+                其他软件、邮件往来或访谈文字：整理为下面的双人对话格式，支持中文、英文昵称和多行正文。
+              </p>
+              <pre className="format-example">
+                {
+                  "我：请问这份方案什么时候能确认？\n对方：明天下午，我会把修改意见发你。\n我：好的，收到后我们再核对。"
+                }
+              </pre>
+              <p>
+                可导入 UTF-8 的 .txt、.md 和 .log
+                文件。当前分析对象是两人的文字对话，群聊需先整理出两人的相关交流；图片、语音和聊天数据库需要先转换成文字。
+              </p>
+            </>
           ) : detail === "action" ? (
             <>
-              <h3>{actionLabel}</h3>
-              <p>
-                {actionOverview
-                  ? ACTIONS[actionOverview.action]?.detail
-                  : busy
-                    ? "正在根据最新聊天更新建议。"
-                    : messages.length
-                      ? "最新聊天的建议尚未更新，请重新分析。"
-                      : "导入后生成建议。"}
-              </p>
-              {actionOverview?.actionEvidenceId && (
+              <h3>{ov ? ACTIONS[ov.action]?.label : "等待聊天"}</h3>
+              <p>{ov ? ACTIONS[ov.action]?.detail : "导入后生成建议。"}</p>
+              {ov?.actionEvidenceId && (
                 <blockquote>
-                  {
-                    messages.find(
-                      (m) => m.id === actionOverview.actionEvidenceId,
-                    )?.text
-                  }
+                  {messages.find((m) => m.id === ov.actionEvidenceId)?.text}
                 </blockquote>
-              )}
-              {!actionOverview && !busy && !!messages.length && (
-                <button onClick={() => a.run(messages, relation)}>
-                  重新分析
-                </button>
               )}
             </>
           ) : detail === "performance" ? (

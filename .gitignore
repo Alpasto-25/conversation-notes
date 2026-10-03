@@ -1,8 +1,19 @@
 node_modules/
 dist/
+dist-mobile/
+dist-desktop/
+android/.build/
+android/*.apk
 .env
 .env.*
 !.env.example
 artifacts/
 
 .runtime/
+work/
+outputs/
+*.jks
+*.keystore
+*.dpapi
+*.apk
+*.apk.idsig

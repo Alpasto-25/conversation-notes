@@ -1,20 +1,38 @@
-# Crush Monitor
+# Conversation Notes (desktop and Android extension)
 
 [简体中文](README.md) · English
 
-A Jev-powered tool for looking at conversations with your crush or partner. It helps you make sense of emotions and intentions, and spot replies you could have worded better.
+> **Special thanks and primary credit to the original author, [FerryCorleone](https://github.com/FerryCorleone).**
+> [crush-monitor](https://github.com/FerryCorleone/crush-monitor) supplied the original idea and the engineering foundation: conversation parsing, structured Jev judgments, emotion and intention displays, and reply evaluation. The author's excellent design and open-source contributions made this extension possible.
+
+This is an unofficial fork, not a project independently created from scratch or an author-endorsed release. The original copyright and MIT license are preserved in full. See [Acknowledgements and contribution scope](ACKNOWLEDGEMENTS.md), and please support the upstream project.
+
+The fork extends two-person conversations to general communication, new acquaintances, friends, family, coworkers, customers, romantic interest and partners, with additional import formats, a notebook UI, and local desktop/mobile packaging. Select a scene in the header or import dialog to analyze emotions, intentions, expression quality and next steps.
+
+Non-romantic scenes evaluate engagement, understanding, respect, support, clarity and follow-through. Romantic scenes retain the original affection-signal dimensions. Scene selection alone does not call the model; click to analyze after switching. Existing conversation text stays in the same browser database, while results from the previous rubric need to be recalculated.
 
 AI doesn't know your relationship or what happens outside the chat. Take the results lightly—as another perspective. Your own judgment and an honest conversation still matter more.
 
 ## Features
 
-- **WeChat-style conversation view:** analysis sits beneath each message.
-- **Emotions and intentions:** the top three probabilities from 12 emotion and 35 intention categories.
-- **Affection score and reply grades:** a conversation-level score, SSS–D grades for your replies, and suggested next steps.
+- **Conversation view:** analysis sits beneath each message. Paste text or import a UTF-8 `.txt`, `.md` or `.log` file.
+- **Emotions and intentions:** the top three probabilities, with additional coordination, requirements, negotiation, follow-up and commitment categories. Non-romantic scenes exclude romantic-interest and flirting candidates.
+- **Scene score and reply grades:** communication-state scores for ordinary scenes, affection signals for romantic scenes, SSS–D grades for your replies, and suggested next steps. Different scenes are not directly comparable.
 - **Ongoing analysis:** paste more messages to continue. Overlapping excerpts are detected, long conversations run in batches, and results survive a page refresh.
 - **Run locally with your own key:** choose TypeSafe, Vercel AI Gateway or OpenRouter and use your own API credits. No hosted deployment required.
+- **First-run tutorial:** a skippable four-step guide, replayable from settings, plus provider-specific key and official billing instructions.
+
+## Download and costs
+
+Download this fork's Windows installer, portable ZIP, or Android APK from [Releases](https://github.com/Alpasto-25/conversation-notes/releases). These are this fork's builds, not releases by the upstream author. Windows x64 requires Windows 10 1809 / Windows 11 and Microsoft Edge WebView2; end users do not need Node. The Windows build is not commercially code-signed. Android 8.0+ builds use a local signing certificate and disable WebView debugging and USB config provisioning; they are not app-store releases. Check the release SHA256 values and keep system security protections enabled.
+
+**The software is free. It does not offer recharge, top-ups, payment collection, payment processing, or API-key sales/giveaways.** Users obtain and manage their own keys from model providers or their official API platforms, and pay providers directly for model calls, credits, and recharge costs. Official links do not receive keys or conversation data. Viewing the guide does not call the model; connection tests and example analysis may incur provider costs. Free credits, pricing and account requirements can change; consult the provider's current official information.
+
+Windows keys are encrypted with DPAPI and Android keys with Keystore. Installed desktop, browser and Android records remain separate. Windows updates preserve the established data directory; do not uninstall Android or clear its data before updating.
 
 The interface and analysis labels are currently in Chinese. This README provides English setup instructions; it does not add an English UI.
+
+WeChat, QQ and the documented WhatsApp text exports retain their parsers. Other messengers, email exchanges and interview transcripts can be formatted as `Name: message`. Only two-person text conversations are supported; group chats need to be reduced to a relevant two-person exchange, and images or audio need transcription first. This does not connect to messaging accounts or read their databases.
 
 ## Why Jev?
 
@@ -27,15 +45,13 @@ Jev is TypeSafe's model for structured judgments, returning classifications, sco
 
 Choose **one** provider below. All three serve Jev; you do not need three accounts or a Vercel-hosted website.
 
-| Provider | Create a key | Setup choice | Free credits |
+| Provider | Create a key | Setup choice | Official credit / billing page |
 | --- | --- | --- | --- |
-| TypeSafe | Sign in to the [TypeSafe console](https://console.typesafe.ai/), create a key under API Keys and copy it | `typesafe` | New users previously received **$5 in trial credits**; check the console for current availability and amount |
-| Vercel AI Gateway | Sign in to Vercel, open [AI Gateway → API Keys](https://vercel.com/d?to=/%5Bteam%5D/~/ai-gateway/api-keys) and select **Create key**. Use an AI Gateway key, not a Vercel account Access Token | `vercel` | **$5/month** on the free tier; card verification required. Purchasing credits ends the monthly free grant ([details](https://vercel.com/docs/ai-gateway/pricing)) |
-| OpenRouter | Sign in to [OpenRouter Keys](https://openrouter.ai/settings/keys), select **Create Key** and copy the new key | `openrouter` | A small new-user trial allowance, with no fixed amount publicly specified. [Jev is paid](https://openrouter.ai/typesafe/jev-1.13/), not a free model ([details](https://openrouter.ai/support/)) |
+| TypeSafe | Sign in to [API Keys](https://console.typesafe.ai/keys), create and securely save your key | `typesafe` | [Official console](https://console.typesafe.ai/); available credit/billing options depend on the current console |
+| Vercel AI Gateway | Open [AI Gateway → API Keys](https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys), select **Create key**; not an account Access Token | `vercel` | [AI Gateway](https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway); use Credits at the top right |
+| OpenRouter | Sign in to [API Keys](https://openrouter.ai/settings/keys), create a key and optionally set a limit | `openrouter` | [Settings → Credits](https://openrouter.ai/settings/credits) |
 
-Vercel AI Gateway currently requires a valid credit card on the account, including for free usage. Without verification, requests return 403.
-
-Free-credit information checked on 2026-09-22. Make sure the account has available credits and access to Jev; grants and promotions may change, so check the provider's dashboard.
+Make sure the account has available credits and Jev access. For Vercel account-verification 403 responses, follow its official account requirements yourself. This software never submits payment information on your behalf.
 
 ## Run locally
 
@@ -105,7 +121,8 @@ Multiline bodies and consecutive messages from the same person are preserved. Da
 
 ## Notes
 
-- The affection score combines six dimensions: keeping the conversation going, engagement, care, openness, intimacy and concrete actions. Click the score for a breakdown. An explicit refusal that still applies limits the score. **It is not the probability that someone likes you.**
+- In romantic scenes, the affection score combines six dimensions: keeping the conversation going, engagement, care, openness, intimacy and concrete actions. Click the score for a breakdown. An explicit refusal that still applies limits the score. **It is not the probability that someone likes you.**
+- In non-romantic scenes, the communication score combines engagement, understanding, respect, support, clarity and follow-through. Reasonable boundaries do not trigger the romantic-refusal score cap; explicit limits still take priority in the next-step advice.
 - Long conversations are processed in batches; the full history is not capped at 500 messages. New imports analyze new content and revisit recent messages from the other person. Previous grades for your own replies are retained.
 - Scoring uses recent messages and relevant original excerpts from history, including invitations, care, refusals and retractions. Old scores are not evidence for new scores. Retrieval can miss context.
 - Each model request stays within 500 messages and 12,000 text characters. Overlong individual messages are retained but need splitting before analysis. Paste at most 250,000 characters at a time; total history depends on browser storage capacity.
@@ -134,16 +151,4 @@ npm run check:live # full analysis with sample chat; uses the selected provider'
 
 ## License
 
-[MIT](LICENSE). Not affiliated with WeChat, Tencent, TypeSafe or any messaging platform mentioned here.
-
-## Community projects
-
-Community members have brought Crush Monitor to phones and desktops, with a few twists of their own. More projects can be added here over time:
-
-| Project | What's different |
-| --- | --- |
-| [FQKH / Crush-](https://github.com/FQKH/Crush-) | Android APK with a DeepSeek analysis option. The repository currently provides an APK but not the full source code. |
-| [RYANFFY / crush-monitor-pack](https://github.com/RYANFFY/crush-monitor-pack) | Windows and macOS installers that save you from running the setup commands yourself. |
-| [Reverie0123 / crush-monitor-universal](https://github.com/Reverie0123/crush-monitor-universal) | Supports DeepSeek and OpenAI-compatible APIs, with an option to switch back to Jev; adds explanations, reply rewrites and analysis report export. |
-
-These are unofficial projects maintained independently by community members. Check each repository before downloading, installing or entering an API key; this project does not guarantee their security or functionality.
+[MIT](LICENSE), with the upstream copyright and permission text preserved. See [ACKNOWLEDGEMENTS.md](ACKNOWLEDGEMENTS.md). No official affiliation with or endorsement by the upstream author, WeChat, Tencent, TypeSafe or any messaging platform mentioned here.

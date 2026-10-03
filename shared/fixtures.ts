@@ -3,6 +3,7 @@ import {
   type Snapshot,
   type Judgment,
   type LineResult,
+  type Relation,
 } from "./types";
 export const examples = [
   {
@@ -45,8 +46,26 @@ export const examples = [
 ];
 export function exampleText(index: number) {
   return examples[index].lines
-    .map(([s, t]) => `${s === "self" ? "我" : "Crush"}：${t}`)
+    .map(([s, t]) => `${s === "self" ? "我" : "对方"}：${t}`)
     .join("\n");
+}
+export function exampleForRelation(relation: Relation) {
+  if (relation === "crush") return exampleText(0);
+  if (relation === "couple") return exampleText(2);
+  const texts = {
+    general:
+      "我：刚才的安排我有点没听明白，是先线上聊吗？\n对方：对，先线上确认需求，有必要再见面。\n我：明白，那我把问题整理好，明天下午两点可以吗？\n对方：可以，我会提前看一下你发的问题。",
+    new: "我：你好，我是昨天活动上和你聊摄影的人。\n对方：你好，我记得。你提到的那本书叫什么？\n我：《摄影的艺术》，我把书名发你。\n对方：谢谢，有时间我会看看。",
+    friend:
+      "朋友：这几天事情有点多，暂时不想聊工作。\n我：好，我们先不聊这个。要不要一起散个步？\n朋友：可以，周六下午吧。\n我：那就周六三点，公园门口见。\n朋友：好，谢谢你理解。",
+    family:
+      "家人：你最近总是忙，我有点担心你。\n我：谢谢关心。我这周比较忙，周日可以好好聊聊。\n家人：好，需要帮忙就说。\n我：会的，也希望你别每天追问进度，我有变化会告诉你。\n家人：明白，我们周日再聊。",
+    colleague:
+      "同事：周五的报告还缺一组数据，你能在周四下午前补齐吗？\n我：可以，我负责数据和图表。结论部分由你写，对吗？\n同事：对，我来写结论，周四四点一起核对。\n我：收到，如果数据有延迟我会在周四中午前告诉你。\n同事：好，这样我们有时间调整。",
+    customer:
+      "客户：这次方案需要包含培训，但预算不能增加。\n我：明白，培训想覆盖哪些岗位？我先确认范围，再调整方案。\n客户：主要是运营团队，线上一小时就够。\n我：可以，我明天下午发包含培训安排的版本，请你确认。\n客户：好，收到后我会和团队一起看。",
+  };
+  return texts[relation];
 }
 const j = (value: number | null): Judgment => ({
   value,

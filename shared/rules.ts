@@ -34,14 +34,20 @@ export function judgment(s: unknown, e: unknown): Judgment {
     probabilities: v.probabilities,
   };
 }
-export function actionResult(a: unknown, b: unknown, p: unknown) {
+export function actionResult(
+  a: unknown,
+  b: unknown,
+  p: unknown,
+  allowed: string[] = Object.keys(ACTIONS),
+) {
   const v = choiceAnswer.parse(a);
   let action = v.confidence < 0.35 ? "insufficient" : v.choice;
-  if (!(action in ACTIONS)) action = "insufficient";
+  if (!(action in ACTIONS) || !allowed.includes(action))
+    action = "insufficient";
   if (noulAnswer.parse(b).noul >= 0.8) action = "respect";
   else if (noulAnswer.parse(p).noul >= 0.75) action = "wait";
   const sorted = Object.entries(v.probabilities)
-    .filter(([k]) => k in ACTIONS)
+    .filter(([k]) => k in ACTIONS && allowed.includes(k))
     .sort((a, b) => b[1] - a[1]);
   const second = sorted[1];
   return {

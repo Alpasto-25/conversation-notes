@@ -1,6 +1,14 @@
 import type { MemoryEvent, MemoryUpdate } from "./memory";
 import type { AffinityDimension } from "./affinity";
-export type Relation = "crush" | "new" | "couple";
+export type Relation =
+  | "general"
+  | "new"
+  | "friend"
+  | "family"
+  | "colleague"
+  | "customer"
+  | "crush"
+  | "couple";
 export type Message = {
   id: string;
   sender: "self" | "other";
@@ -45,7 +53,6 @@ export type Overview = {
   alternative?: string;
   evidenceId: string | null;
   actionEvidenceId: string | null;
-  actionAnchorId?: string;
 };
 export type Snapshot = {
   revision: number;
@@ -79,12 +86,39 @@ export type AnalysisResponse = {
   latencyMs: number;
 };
 export const MODEL = "jev-1.13.0";
-export const RUBRIC = "crush-2026-09-21.2";
+export const RUBRIC = "conversation-2026-10-02.1";
 export const RELATIONS: Record<Relation, string> = {
-  crush: "Crush / 暧昧中",
+  general: "通用沟通",
   new: "刚认识",
+  friend: "朋友相处",
+  family: "家庭沟通",
+  colleague: "工作协作",
+  customer: "客户沟通",
+  crush: "暧昧 / 恋爱意向",
   couple: "恋爱中",
 };
+export const SCENE_GUIDANCE: Record<Relation, string> = {
+  general:
+    "根据原文判断交流目的，关注回应、理解、尊重和行动，不预设双方有恋爱关系。",
+  new: "双方刚认识，正常客气、谨慎和隐私边界不表示疏远，也不预设浪漫意图。",
+  friend:
+    "关注友谊中的支持、互相理解和相处安排。热情、玩笑与关心不自动表示恋爱兴趣。",
+  family:
+    "关注家人之间的理解、需要、照顾和自主边界。不因亲属身份合理化施压，也不把服从当成良好沟通。",
+  colleague:
+    "关注目标、信息、分工、时间和协作。简洁、专业和合理异议可以是良好沟通，不要求情绪亲密或私人披露。",
+  customer:
+    "双方是业务沟通关系，self 与 other 的具体业务角色以原文为准。关注需求、预期、承诺和后续安排，不把礼貌推断成信任、成交或私人好感。",
+  crush: "仅有可见且被接纳的证据时判断浪漫兴趣；礼貌、关心和热闹本身不是暧昧。",
+  couple:
+    "关注伴侣当前实际交流和相互理解，不因关系设置自动加分，尊重双方边界。",
+};
+export function isRomantic(relation: Relation) {
+  return relation === "crush" || relation === "couple";
+}
+export function metricLabel(relation: Relation) {
+  return isRomantic(relation) ? "好感信号" : "沟通状态";
+}
 export const TONES: Record<string, string> = {
   warm: "关心靠近",
   playful: "俏皮试探",
@@ -101,6 +135,10 @@ export const STAGES: Record<string, string> = {
   flirt: "出现暧昧",
   date: "有具体约会安排",
   mutual: "明确互表心意",
+  clarification: "需要澄清理解",
+  disagreement: "分歧尚待处理",
+  agreement: "已有明确共识",
+  followthrough: "已确认行动安排",
 };
 export const ACTIONS: Record<string, { label: string; detail: string }> = {
   continue: { label: "顺着聊", detail: "接住刚才的话题，别急着切换频道。" },
@@ -117,8 +155,16 @@ export const ACTIONS: Record<string, { label: string; detail: string }> = {
     detail: "顺着已经被接住的玩笑，留一点刚刚好的暧昧。",
   },
   invite: {
-    label: "试着约一下",
-    detail: "把共同兴趣变成一个具体、没有压力的小邀约。",
+    label: "提出邀约",
+    detail: "把共同活动变成一个具体、没有压力的安排，给对方选择空间。",
+  },
+  propose: {
+    label: "提出方案",
+    detail: "回应当前需要，给出一个具体可行的办法，再确认对方是否接受。",
+  },
+  confirm: {
+    label: "确认安排",
+    detail: "核对已经谈到的事项、负责人和时间，确认双方对下一步的理解一致。",
   },
   clarify: {
     label: "直接问清",

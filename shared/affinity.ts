@@ -1,4 +1,4 @@
-import type { Judgment } from "./types";
+import { isRomantic, type Judgment, type Relation } from "./types";
 export const AFFINITY_DIMENSIONS = [
   {
     key: "initiative",
@@ -84,6 +84,95 @@ export const AFFINITY_DIMENSIONS = [
     ],
   },
 ] as const;
+export const COMMUNICATION_DIMENSIONS = [
+  {
+    key: "engagement",
+    label: "回应投入",
+    weight: 20,
+    question:
+      "other 是否回应 self 的具体内容和重点？简洁回复、异步沟通和忙碌本身不扣分。",
+    levels: [
+      "明确无视、贬低或反复绕开重要表达",
+      "有回应机会却只敷衍，关键问题持续未被接住",
+      "基本回应了问题或话题",
+      "针对细节认真回应，或说明何时可以回复",
+      "持续回应关键内容，主动跟进此前的问题或需要",
+    ],
+  },
+  {
+    key: "understanding",
+    label: "理解确认",
+    weight: 20,
+    question:
+      "other 是否理解和核对 self 的意思、需要或目标？提出合理异议不等于缺乏理解。",
+    levels: [
+      "明确歪曲、否定表达，误解被指出后仍拒绝澄清",
+      "多次错过重点，未回应已有的澄清机会",
+      "基本接住意思，但关键理解尚未核对",
+      "准确回应重点，主动确认含糊之处",
+      "明确核对并协调双方的理解、需要或目标",
+    ],
+  },
+  {
+    key: "respect",
+    label: "尊重边界",
+    weight: 20,
+    question:
+      "other 是否尊重 self 的选择、时间、隐私和已表达的边界？礼貌拒绝、表达自己的边界和合理不同意见可以是积极证据，不要求服从。",
+    levels: [
+      "明确威胁、羞辱、强迫或无视已提出的边界",
+      "反复施压、越界，或否定对方合理选择",
+      "基本有分寸，未见明确越界或特别的边界协商",
+      "清晰礼貌地表达不同意见、拒绝或限制，并尊重对方选择",
+      "主动确认和照顾双方边界，协商方式具体且不施压",
+    ],
+  },
+  {
+    key: "support",
+    label: "支持配合",
+    weight: 15,
+    question:
+      "other 是否对 self 明确表达的情绪、需求或任务提供适合场景的支持？工作和业务场景不要求亲昵称呼或个人化关心。",
+    levels: [
+      "明确嘲弄困难或阻碍合理沟通",
+      "在需要已被表达且有回应机会时，只推诿或敷衍",
+      "基本礼貌、正常交流或一般配合",
+      "具体接住需要，提供情绪支持、信息或可行帮助",
+      "持续主动协调资源、支持需要或解决已有困难",
+    ],
+  },
+  {
+    key: "clarity",
+    label: "表达清晰",
+    weight: 15,
+    question:
+      "other 是否清楚表达相关信息、需要、立场或限制？只看当前交流所需内容，正常隐私和不分享私人经历不扣分。",
+    levels: [
+      "在原文可验证的关键事项上明确自相矛盾，且拒绝说明",
+      "有必要澄清却持续含糊，造成明显理解障碍",
+      "主要意思可理解，部分细节未展开",
+      "信息、需要或限制表达具体，必要时解释原因",
+      "主动补齐关键条件，清楚说明可做、不能做和待确认的事项",
+    ],
+  },
+  {
+    key: "followthrough",
+    label: "行动跟进",
+    weight: 10,
+    question:
+      "涉及约定、任务或共同安排时，other 是否明确跟进？没谈到行动不当成负面证据；成交、履约或线下行动必须有原文支持。",
+    levels: [
+      "有明确承诺却在原文中确认违背，且拒绝处理",
+      "对已有安排反复推诿，未提供下一步或说明",
+      "有一般行动意向，或这段交流尚未涉及具体行动",
+      "明确下一步、时间或替代方案，愿意协调",
+      "安排已被双方确认，或原文明确证明相关行动已兑现",
+    ],
+  },
+] as const;
+export function dimensionsForRelation(relation: Relation) {
+  return isRomantic(relation) ? AFFINITY_DIMENSIONS : COMMUNICATION_DIMENSIONS;
+}
 export type AffinityDimension = {
   key: string;
   label: string;
@@ -96,7 +185,7 @@ export function composeAffinity(
 ) {
   const total = dimensions.reduce((s, d) => s + d.weight, 0);
   if (!total || dimensions.some((d) => d.judgment.value === null))
-    throw new Error("好感维度缺失");
+    throw new Error("分析维度缺失");
   const rawValue = Math.round(
     dimensions.reduce((s, d) => s + d.weight * d.judgment.value!, 0) / total,
   );

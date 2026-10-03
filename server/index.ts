@@ -105,7 +105,7 @@ app.use(
 const port = Number(process.env.PORT || 3178);
 app.listen(port, process.env.HOST || "127.0.0.1", () => {
   const status = providerStatus();
-  console.log(`Crush API: http://${process.env.HOST || "127.0.0.1"}:${port}`);
+  console.log(`Conversation API: http://${process.env.HOST || "127.0.0.1"}:${port}`);
   console.log(
     status.configured
       ? `Jev: ${status.provider} · ${status.model} · Key configured (not yet verified)`
