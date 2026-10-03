@@ -32,6 +32,7 @@ import {
   ChevronRight,
   BookOpen,
   Sparkles,
+  Download,
 } from "lucide-react";
 import { parseChat, toMessages, mergeMessages } from "../shared/parser";
 import {
@@ -54,6 +55,8 @@ import { MobileSettings } from "./MobileSettings";
 import { BillingNotice, ProviderHelp } from "./ProviderHelp";
 import { FirstRunGuide } from "./FirstRunGuide";
 import { markOnboardingSeen, shouldShowOnboarding } from "../shared/provider-guides";
+import { useUpdates } from "./useUpdates";
+import { UpdatesPage } from "./UpdatesPage";
 
 function Modal({
   title,
@@ -117,6 +120,8 @@ function Modal({
 }
 export default function App() {
   const a = useAnalysis();
+  const updates = useUpdates();
+  const [updatesOpen, setUpdatesOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]),
     [input, setInput] = useState(""),
     [self, setSelf] = useState(""),
@@ -161,6 +166,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     window.__notebookBack = () => {
+      if (updatesOpen) { setUpdatesOpen(false); return true; }
       if (onboarding) {
         finishGuide();
         return true;
@@ -186,7 +192,7 @@ export default function App() {
     return () => {
       delete window.__notebookBack;
     };
-  }, [overlap, importing, settings, detail, onboarding]);
+  }, [overlap, importing, settings, detail, onboarding, updatesOpen]);
   const scroller = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const virtual = useVirtualizer({
@@ -443,6 +449,7 @@ export default function App() {
               <BookOpen size={18} /> 试试一段示例
             </button>
             <span className="rail-label rail-label-second">工具与帮助</span>
+            <button onClick={() => setUpdatesOpen(true)}><Download size={18} /> 版本与更新{updates.result?.status === "available" && <span className="nav-count">新</span>}</button>
             <button onClick={() => setOnboarding(true)}><BookOpen size={18} /> 使用引导</button>
             <button onClick={() => setDetail("overview")}>
               <Sparkles size={18} /> 查看分析解读
@@ -478,6 +485,7 @@ export default function App() {
               <strong>对话手记</strong>
             </div>
             <div className="header-tools">
+              <button className={`icon update-entry ${updates.result?.status === "available" ? "has-update" : ""}`} aria-label="版本与更新" title="版本与更新" onClick={() => setUpdatesOpen(true)}><Download size={18} /></button>
               <button
                 className={`api-badge ${apiInfo?.configured ? "configured" : ""}`}
                 onClick={() => setSettings(true)}
@@ -547,6 +555,11 @@ export default function App() {
                   {storageError ? "保存异常" : "仅在本机保存"}
                 </span>
               </div>
+              {updates.showReminder && <div className="update-reminder" role="status">
+                <span>有新的{isMobile ? "手机版" : isDesktop ? "电脑版" : "应用"}可下载</span>
+                <button onClick={() => setUpdatesOpen(true)}>查看更新 <ArrowUpRight size={13} /></button>
+                <button className="icon" aria-label="暂不提醒此构建" onClick={updates.dismiss}><X size={15} /></button>
+              </div>}
             </div>
             <button
               className="header-affinity"
@@ -1022,8 +1035,10 @@ export default function App() {
             ，重新打开后可继续；分析时只发送所需片段给模型服务。清空会删除本机记录。
           </p>
           <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>重新查看使用引导</button>
+          <button className="secondary" onClick={() => { setSettings(false); setUpdatesOpen(true); }}>版本与更新 / Release 下载页</button>
         </Modal>
       )}
+      {updatesOpen && <Modal title="版本与更新" close={() => setUpdatesOpen(false)}><UpdatesPage updates={updates} /></Modal>}
       {detail === "clear" && (
         <Modal title="开始新的聊天？" close={() => setDetail(null)}>
           <p>当前聊天、分析和本机保存的记录都会删除。</p>

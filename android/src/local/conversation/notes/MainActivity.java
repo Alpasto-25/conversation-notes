@@ -61,6 +61,12 @@ public final class MainActivity extends Activity {
     private static final String MASTER_KEY = "conversation-notes-config-v1";
     private static final String IMPORT_KEY = "conversation-notes-usb-v1";
     private static final int FILE_PICKER = 410;
+    private static final String RELEASE_API = "https://api.github.com/repos/Alpasto-25/conversation-notes/releases/latest";
+    private static final String RELEASE_PAGE = "https://github.com/Alpasto-25/conversation-notes/releases/latest";
+    private JSONObject cachedRelease;
+    private ApiException releaseFailure;
+    private long releaseExpires;
+    private final Object releaseLock = new Object();
     private WebView web;
     private SharedPreferences prefs;
     private ValueCallback<Uri[]> fileCallback;
@@ -300,6 +306,37 @@ public final class MainActivity extends Activity {
         }
         return name + "：" + reason;
     }
+    // Independent of model configuration, keys, chat and model request budgets.
+    private JSONObject checkUpdates(String id) throws Exception {
+      synchronized (releaseLock) {
+        if (cancelled.contains(id) || destroyed) throw new ApiException(499, "更新检查已取消。");
+        if (android.os.SystemClock.elapsedRealtime() < releaseExpires) {
+            if (releaseFailure != null) throw releaseFailure;
+            return cachedRelease;
+        }
+        HttpURLConnection connection = (HttpURLConnection) new URL(RELEASE_API).openConnection();
+        connections.put(id, connection);
+        try {
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(10000); connection.setReadTimeout(10000);
+            connection.setRequestProperty("Accept", "application/vnd.github+json");
+            connection.setRequestProperty("User-Agent", "ConversationNotes-UpdateCheck");
+            if (connection.getResponseCode() != 200 || connection.getContentLengthLong() > 131072) throw new java.io.IOException();
+            try (InputStream input = connection.getInputStream()) {
+                cachedRelease = new JSONObject(new String(readLimited(input, 131072, false), StandardCharsets.UTF_8));
+            }
+            releaseFailure = null;
+            releaseExpires = android.os.SystemClock.elapsedRealtime() + 60000;
+            return cachedRelease;
+        } catch (Exception ignored) {
+            if (cancelled.contains(id) || destroyed) throw new ApiException(499, "更新检查已取消。");
+            releaseFailure = new ApiException(502, "更新检查暂不可用，请检查网络、稍后重试，或直接查看 Release 页。");
+            releaseExpires = android.os.SystemClock.elapsedRealtime() + 60000;
+            throw releaseFailure;
+        } finally { connections.remove(id); connection.disconnect(); }
+      }
+    }
     private void deliver(String id, boolean ok, JSONObject value) {
         runOnUiThread(() -> {
             if (!destroyed) web.evaluateJavascript("window.__dialogueNativeResolve && window.__dialogueNativeResolve("
@@ -314,6 +351,18 @@ public final class MainActivity extends Activity {
                 try {
                     if (cancelled.contains(id)) return;
                     JSONObject input = new JSONObject(raw), result;
+                    if (method.equals("openRelease")) {
+                        runOnUiThread(() -> {
+                            if (destroyed) return;
+                            try {
+                                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE)).addCategory(Intent.CATEGORY_BROWSABLE));
+                                deliver(id, true, new JSONObject().put("opened", true));
+                            } catch (Exception ignored) {
+                                try { deliver(id, false, new JSONObject().put("status", 502).put("error", "无法打开浏览器，请复制 Release 链接自行访问。")); } catch (Exception ignoredAgain) {}
+                            }
+                        });
+                        return;
+                    }
                     if (method.equals("openExternal")) {
                         String url = input.optString("url");
                         Uri uri = Uri.parse(url);
@@ -339,6 +388,7 @@ public final class MainActivity extends Activity {
                     if (method.equals("status")) result = status();
                     else if (method.equals("configure")) result = configure(input);
                     else if (method.equals("evaluate")) result = evaluate(id, input);
+                    else if (method.equals("checkUpdates")) result = checkUpdates(id);
                     else throw new ApiException(400, "不支持的操作。");
                     if (!cancelled.contains(id)) deliver(id, true, result);
                 } catch (Exception error) {

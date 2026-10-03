@@ -10,7 +10,7 @@ for (const name of ['src','shared','server','tests','public','android','desktop'
   await cp(join(root,name), join(out,name), {recursive:true});
 }
 await mkdir(join(out,'scripts'));
-for (const name of ['setup.ts','check-api.ts','check-live.ts','export-source.mjs','provision-android.mjs','audit-android.mjs','audit-desktop.mjs','export-provider-links.ts','audit-publication.mjs']) await cp(join(root,'scripts',name),join(out,'scripts',name));
+for (const name of ['setup.ts','check-api.ts','check-live.ts','export-source.mjs','provision-android.mjs','audit-android.mjs','audit-desktop.mjs','export-provider-links.ts','audit-publication.mjs','prepare-release.ts']) await cp(join(root,'scripts',name),join(out,'scripts',name));
 const env = await readFile(join(root,'.env'),'utf8').catch(()=>'');
 const keys = ['JEV_API_KEY', 'TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY'];
 const secrets = keys.flatMap(key => [parse(env)[key], process.env[key]]).filter(v=>v && v.length>8);

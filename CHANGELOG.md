@@ -1,5 +1,18 @@
 # 本 Fork 的版本记录
 
+## 对话手记 1.1.0：Release 入口与更新提醒（版本号不变）
+
+首先感谢 [FerryCorleone](https://github.com/FerryCorleone) 与原项目贡献者的卓越贡献。保留原作者历史、署名及完整 MIT 许可；新增功能和安装包由本 Fork 提供，不代表原作者背书。
+
+- 新增顶部、侧栏和设置中的“版本与更新”页，显示当前版本和内部构建，固定跳转本仓库的最新 Release。
+- 每次打开以及运行期间每 6 小时检查，支持手动检查、关闭自动检查和按构建关闭提醒；退出后没有后台服务或推送。
+- 通过独立的 Windows / Android 构建标识与附件 SHA256 识别同版本更新；网络失败或缺失元信息不会误报“最新版”。
+- 更新检查使用固定的公开 GitHub GET，不携带 Key、聊天或设备标识，不调用模型、不消耗模型额度，不自动下载安装。
+- Windows 和 Android 都重新打包为 1.1.0，沿用原安装位置、数据结构和 Android 签名；手机不自动安装。旧版须先手动安装本次包才具有提醒功能。
+- 80 项 Node 离线测试、97 项 C# 原生检查通过；真实 WebView2 更新链路、冷启动持久化、六小时定时器和 361px 布局已验证。Android 页面使用离线桥替身验证，未做新版手机实装。
+
+对应源码通过 Release 的提交链接提供，不移动原 v1.1.0 标签。软件仍免费，不提供充值或 Key；模型费用由用户自行承担。
+
 ## 对话手记 1.1.0：Windows 修复更新（版本号不变）
 
 继续首先感谢 [FerryCorleone](https://github.com/FerryCorleone) 和 [crush-monitor](https://github.com/FerryCorleone/crush-monitor) 的贡献者提供卓越的设计与工程基础。原作者历史、版权与 MIT 许可完整保留；本 Fork 的 Windows 打包错误由本 Fork 修复，不代表原作者发行或背书。

@@ -134,6 +134,54 @@ namespace ConversationNotes
                     catch (OperationCanceledException) { Check(true, "cancellation reaches native transport"); }
                 }
             }
+            string opened = null;
+            ReleaseClient.Open(value => opened = value);
+            Check(opened == ReleaseClient.Page, "Release opener is fixed, independent of provider allowlist");
+            int releaseCalls = 0;
+            FakeHttp releaseHttp = new FakeHttp();
+            releaseHttp.Run = async (request, token) => {
+                releaseCalls++;
+                Check(request.Method == HttpMethod.Get && request.RequestUri.AbsoluteUri == ReleaseClient.Endpoint, "fixed release GET endpoint");
+                Check(request.Headers.Authorization == null && request.Content == null && !request.Headers.Contains("Cookie"), "release request has no key, body or cookies");
+                Check(request.Headers.UserAgent.ToString() == "ConversationNotes-UpdateCheck", "static public update user agent");
+                await Task.Delay(10, token);
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"tag_name\":\"v1.1.0\"}") };
+            };
+            using (ReleaseClient releases = new ReleaseClient(new HttpClient(releaseHttp)))
+            {
+                object[] results = await Task.WhenAll(releases.Check(CancellationToken.None), releases.Check(CancellationToken.None));
+                Check(releaseCalls == 1 && Json.Text((Dictionary<string, object>)results[0], "tag_name") == "v1.1.0", "parallel release checks share successful cache");
+                await releases.Check(CancellationToken.None);
+                Check(releaseCalls == 1, "release cache protects GitHub rate limit");
+            }
+            foreach (HttpResponseMessage response in new[] {
+                new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent(TestKey) },
+                new HttpResponseMessage(HttpStatusCode.Redirect),
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("not JSON") },
+                new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(new string('x', 131073)) }
+            })
+            {
+                int attempts = 0;
+                releaseHttp = new FakeHttp();
+                releaseHttp.Run = (request, token) => { attempts++; return Task.FromResult(response); };
+                using (ReleaseClient releases = new ReleaseClient(new HttpClient(releaseHttp)))
+                {
+                    for (int n = 0; n < 2; n++)
+                    {
+                        try { await releases.Check(CancellationToken.None); throw new Exception("Expected update failure"); }
+                        catch (ApiException error) { Check(error.Status == 502 && !error.Message.Contains(TestKey), "safe update failure"); }
+                    }
+                    Check(attempts == 1, "failed release checks also have cooldown");
+                }
+            }
+            releaseHttp = new FakeHttp();
+            releaseHttp.Run = async (request, token) => { await Task.Delay(10000, token); return new HttpResponseMessage(HttpStatusCode.OK); };
+            using (ReleaseClient releases = new ReleaseClient(new HttpClient(releaseHttp)))
+            using (CancellationTokenSource cancel = new CancellationTokenSource(30))
+            {
+                try { await releases.Check(cancel.Token); throw new Exception("Expected release cancellation"); }
+                catch (OperationCanceledException) { Check(true, "release cancellation reaches native HTTP"); }
+            }
             Console.WriteLine("Desktop offline checks passed: " + checks);
         }
         private static int Main(string[] args)

@@ -1,7 +1,16 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-export default defineConfig(({ mode }) => ({
+import { randomUUID } from "node:crypto";
+export default defineConfig(({ mode }) => {
+  const info = { schema: 1, platform: mode === "desktop" ? "windows" : mode === "mobile" ? "android" : "web",
+    version: "1.1.0", buildId: `${new Date().toISOString().replace(/[^0-9]/g, "")}-${randomUUID().slice(0, 8)}`,
+    builtAt: new Date().toISOString() };
+  return ({
+  define: { __APP_BUILD_INFO__: JSON.stringify(info) },
   plugins: [react(), {
+    name: "app-build-info",
+    generateBundle() { this.emitFile({ type: "asset", fileName: "build-info.json", source: JSON.stringify(info, null, 2) + "\n" }); },
+  }, {
     name: "desktop-content-security",
     transformIndexHtml(html) {
       if (mode !== "desktop") return html;
@@ -14,4 +23,4 @@ export default defineConfig(({ mode }) => ({
     strictPort: true,
     proxy: { "/api": "http://127.0.0.1:3178" },
   },
-}));
+}); });

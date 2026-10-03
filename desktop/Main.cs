@@ -154,6 +154,79 @@ namespace ConversationNotes
         }
     }
 
+    internal sealed class ReleaseClient : IDisposable
+    {
+        internal const string Endpoint = "https://api.github.com/repos/Alpasto-25/conversation-notes/releases/latest";
+        internal const string Page = "https://github.com/Alpasto-25/conversation-notes/releases/latest";
+        private readonly HttpClient client;
+        private readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
+        private DateTime expires = DateTime.MinValue;
+        private object cached;
+        private ApiException failure;
+        internal ReleaseClient(HttpClient testingClient = null)
+        {
+            client = testingClient ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
+            client.Timeout = TimeSpan.FromSeconds(10);
+        }
+        internal async Task<object> Check(CancellationToken token)
+        {
+            await gate.WaitAsync(token);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                if (DateTime.UtcNow < expires) { if (failure != null) throw failure; return cached; }
+                try
+                {
+                    using (CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(token))
+                    using (HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, Endpoint))
+                    {
+                        deadline.CancelAfter(TimeSpan.FromSeconds(10));
+                        request.Headers.Accept.ParseAdd("application/vnd.github+json");
+                        request.Headers.UserAgent.ParseAdd("ConversationNotes-UpdateCheck");
+                        using (HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token))
+                        {
+                            if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > 131072) throw new InvalidDataException();
+                            using (Stream source = await response.Content.ReadAsStreamAsync())
+                            using (MemoryStream result = new MemoryStream())
+                            {
+                                byte[] buffer = new byte[8192];
+                                int count;
+                                while ((count = await source.ReadAsync(buffer, 0, buffer.Length, deadline.Token)) > 0)
+                                {
+                                    if (result.Length + count > 131072) throw new InvalidDataException();
+                                    result.Write(buffer, 0, count);
+                                }
+                                cached = Json.Decode(Encoding.UTF8.GetString(result.ToArray()));
+                            }
+                        }
+                    }
+                    failure = null;
+                    expires = DateTime.UtcNow.AddSeconds(60);
+                    return cached;
+                }
+                catch (OperationCanceledException)
+                {
+                    if (token.IsCancellationRequested) throw;
+                    throw new ApiException(504, "更新检查超时，请稍后重试或直接查看 Release 页。");
+                }
+                catch
+                {
+                    failure = new ApiException(502, "更新检查暂不可用，请检查网络、稍后重试，或直接查看 Release 页。");
+                    expires = DateTime.UtcNow.AddSeconds(60);
+                    throw failure;
+                }
+            }
+            finally { gate.Release(); }
+        }
+        internal static object Open(Action<string> opener = null)
+        {
+            if (opener != null) opener(Page);
+            else System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Page) { UseShellExecute = true });
+            return new { opened = true };
+        }
+        public void Dispose() { client.Dispose(); }
+    }
+
     internal sealed class ModelClient : IDisposable
     {
         private readonly ConfigStore store;
@@ -269,12 +342,14 @@ namespace ConversationNotes
         private readonly WebView2 web = new WebView2();
         private readonly ConfigStore config;
         private readonly ModelClient model;
+        private readonly ReleaseClient releases;
         private readonly ConcurrentDictionary<string, CancellationTokenSource> jobs = new ConcurrentDictionary<string, CancellationTokenSource>();
-        internal NotebookWindow(string dataRoot, HttpClient testingClient = null)
+        internal NotebookWindow(string dataRoot, HttpClient testingClient = null, HttpClient testingReleaseClient = null)
         {
             this.dataRoot = dataRoot;
             config = new ConfigStore(dataRoot);
             model = new ModelClient(config, testingClient);
+            releases = new ReleaseClient(testingReleaseClient);
             Text = "对话手记";
             Size = new Size(1240, 850);
             MinimumSize = new Size(750, 560);
@@ -288,7 +363,7 @@ namespace ConversationNotes
             Controls.Add(web);
             Shown += async delegate { await Initialize(); };
             FormClosing += delegate { foreach (CancellationTokenSource job in jobs.Values) job.Cancel(); };
-            FormClosed += delegate { web.Dispose(); model.Dispose(); };
+            FormClosed += delegate { web.Dispose(); model.Dispose(); releases.Dispose(); };
         }
         private static bool IsLocal(string url)
         {
@@ -374,6 +449,8 @@ namespace ConversationNotes
                         result = picker.ShowDialog(this) == DialogResult.OK ? config.Import(picker.FileName) : null;
                 }
                 else if (method == "evaluate") result = await model.Evaluate(payload, cancellation.Token);
+                else if (method == "checkUpdates") result = await releases.Check(cancellation.Token);
+                else if (method == "openRelease") result = ReleaseClient.Open();
                 else if (method == "openExternal") result = OfficialLinks.Open(Json.Text(payload, "url"));
                 else throw new ApiException(400, "不支持的操作。");
                 Reply(id, true, result);

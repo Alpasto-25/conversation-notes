@@ -257,6 +257,20 @@ h3 {
 .api-badge.configured > span {
   background: #56825d;
 }
+.update-entry { position: relative; }
+.update-entry.has-update::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); position: absolute; right: 5px; top: 5px; }
+.update-reminder { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; background: #eef3f9; border: 1px solid #d6e0ed; border-radius: 8px; padding: 8px 10px; margin-top: 12px; font-size: 12px; color: #365473; }
+.update-reminder > button { font-size: 12px; padding: 0; color: inherit; }
+.update-reminder > .icon { width: 24px; height: 24px; min-height: 24px; margin-left: auto; }
+.build-details { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; font-size: 12px; color: var(--muted); margin: 16px 0; }
+.build-details dd { margin: 0; overflow-wrap: anywhere; }
+.update-state { background: #eef3f9; border-radius: 8px; padding: 14px; line-height: 1.7; font-size: 13px; overflow-wrap: anywhere; }
+.updates-page .update-state p, .updates-page .update-time { font-size: 12px; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.update-actions > button { width: auto; margin: 0; }
+.release-address { font-size: 11px; overflow-wrap: anywhere; user-select: text; }
+.update-preference { display: flex; align-items: center; gap: 10px; margin-top: 24px; font-size: 13px; }
+.update-preference input { width: 18px; height: 18px; accent-color: var(--accent); }
 .document-head {
   grid-column: 2;
   padding: 28px 32px 24px;

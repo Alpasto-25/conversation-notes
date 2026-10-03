@@ -5,6 +5,7 @@ import { join, dirname } from "node:path";
 import { analyze, requestSchema } from "./analysis";
 import { providerStatus, ConfigurationError } from "./provider-config";
 import { ProviderError, providerErrorMessage } from "./provider";
+import { createReleaseChecker } from "./updates";
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "512kb" }));
@@ -15,6 +16,11 @@ app.use((_req, res, next) => {
   next();
 });
 app.get("/api/health", (_req, res) => res.json(providerStatus()));
+const checkRelease = createReleaseChecker();
+app.get("/api/updates", async (_req, res) => {
+  try { res.json(await checkRelease()); }
+  catch { res.status(502).json({ error: "更新检查暂不可用，请检查网络或直接查看 Release 页。" }); }
+});
 let calls = 0;
 let windowAt = Date.now();
 let active = 0;

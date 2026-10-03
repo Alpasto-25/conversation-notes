@@ -1,6 +1,10 @@
 import type { AnalysisRequest } from "../shared/types";
 import { validateResult, ProviderError } from "../shared/provider-contract";
 import { isOfficialProviderUrl } from "../shared/provider-guides";
+import { RELEASES_URL, type BuildInfo } from "../shared/updates";
+
+declare const __APP_BUILD_INFO__: BuildInfo;
+export const APP_BUILD = __APP_BUILD_INFO__;
 
 export const isMobile = import.meta.env.MODE === "mobile";
 export const isDesktop = import.meta.env.MODE === "desktop";
@@ -124,6 +128,17 @@ export function importDesktopConfig() {
 export function openOfficialProviderPage(url: string) {
   if (!isOfficialProviderUrl(url)) return Promise.reject(new Error("只允许打开已核对的供应商官方入口。"));
   return nativeCall<{ opened: boolean }>("openExternal", { url });
+}
+export async function checkUpdates(signal?: AbortSignal): Promise<unknown> {
+  if (isNative) return nativeCall("checkUpdates", {}, signal);
+  const response = await fetch("/api/updates", { signal, credentials: "omit" });
+  if (!response.ok) throw new Error("更新检查暂不可用，请检查网络或直接查看 Release 页。");
+  return response.json();
+}
+export function openReleasePage(): Promise<unknown> {
+  if (isNative) return nativeCall("openRelease");
+  window.open(RELEASES_URL, "_blank", "noopener,noreferrer");
+  return Promise.resolve();
 }
 export async function checkMobileConnection() {
   const questions = {
