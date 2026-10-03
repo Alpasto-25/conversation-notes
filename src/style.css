@@ -172,8 +172,8 @@ h3 {
 .notebook-entry { flex: 1; min-width: 0; text-align: left; align-items: flex-start; justify-content: flex-start; gap: 8px; border-radius: 6px; padding: 10px; }
 .notebook-entry > svg { flex-shrink: 0; margin-top: 3px; }
 .notebook-entry > span { min-width: 0; }
-.notebook-entry strong { display: block; font-weight: 500; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.notebook-entry small { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.notebook-entry strong { display: block; font-weight: 500; font-size: 14px; line-height: 1.5; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notebook-entry small { display: block; color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 4px; }
 .notebook-actions { display: flex; flex-shrink: 0; opacity: 0; transition: opacity 120ms ease; }
 .notebook-row:hover .notebook-actions, .notebook-row:focus-within .notebook-actions, .notebook-row.selected .notebook-actions { opacity: 1; }
 .notebook-actions .icon { width: 25px; height: 28px; padding: 4px; }
@@ -193,8 +193,8 @@ h3 {
 .compact .folder-search input { font-size: 11px; }
 .chat-rail .folder-toolbar button { padding: 0; min-height: 28px; width: 28px; }
 .chat-rail .notebook-entry { padding: 7px; min-height: 0; gap: 6px; }
-.chat-rail .notebook-entry strong { font-size: 12px; }
-.chat-rail .notebook-entry small { font-size: 10px; }
+.chat-rail .notebook-entry strong { font-size: 14px; }
+.chat-rail .notebook-entry small { font-size: 12px; }
 .chat-rail .folder-toggle { min-height: 32px; padding: 7px 2px; gap: 6px; }
 .chat-rail .folder-controls .icon, .chat-rail .notebook-actions .icon { min-height: 28px; padding: 4px; }
 .chat-rail .notebook-row.selected .notebook-entry { color: #28537c; }
@@ -313,7 +313,8 @@ h3 {
   background: #56825d;
 }
 .update-entry { position: relative; }
-.update-entry.has-update::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); position: absolute; right: 5px; top: 5px; }
+.update-icon { position: relative; display: inline-flex; flex-shrink: 0; }
+.update-dot { position: absolute; right: -3px; top: -3px; width: 10px; height: 10px; border: 2px solid var(--paper); border-radius: 50%; background: #d93025; pointer-events: none; }
 .update-reminder { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; background: #eef3f9; border: 1px solid #d6e0ed; border-radius: 8px; padding: 8px 10px; margin-top: 12px; font-size: 12px; color: #365473; }
 .update-reminder > button { font-size: 12px; padding: 0; color: inherit; }
 .update-reminder > .icon { width: 24px; height: 24px; min-height: 24px; margin-left: auto; }
@@ -645,17 +646,17 @@ h3 {
   max-width: 100%;
 }
 .analysis-row-label {
-  color: #8d8882;
-  font-size: 10px;
-  line-height: 22px;
+  color: #706b65;
+  font-size: 12px;
+  line-height: 28px;
   margin-right: 2px;
 }
 .emotion-tag,
 .intent-tag {
-  padding: 3px 7px;
+  padding: 5px 8px;
   border-radius: 4px;
-  font-size: 10px;
-  line-height: 16px;
+  font-size: 12px;
+  line-height: 18px;
   gap: 6px;
   white-space: nowrap;
 }
@@ -665,9 +666,9 @@ h3 {
 }
 .emotion-tag b,
 .intent-tag b {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 500;
-  opacity: 0.7;
+  opacity: 0.85;
   font-variant-numeric: tabular-nums;
 }
 .emotion-happy,
@@ -707,8 +708,8 @@ h3 {
 .reply-tag,
 .pending-tag {
   border-radius: 4px;
-  font-size: 10px;
-  padding: 3px 6px;
+  font-size: 12px;
+  padding: 5px 8px;
   color: #757575;
   gap: 3px;
 }

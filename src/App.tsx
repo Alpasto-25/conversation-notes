@@ -403,7 +403,10 @@ export default function App() {
               <BookOpen size={18} /> 试试一段示例
             </button>
             <span className="rail-label rail-label-second">工具与帮助</span>
-            <button onClick={() => setUpdatesOpen(true)}><Download size={18} /> 版本与更新{updates.result?.status === "available" && <span className="nav-count">新</span>}</button>
+            <button className="update-entry" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} onClick={() => setUpdatesOpen(true)}>
+              <span className="update-icon"><Download size={18} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
+              版本与更新{updates.hasUpdate && <span className="nav-count">新</span>}
+            </button>
             <button onClick={() => setOnboarding(true)}><BookOpen size={18} /> 使用引导</button>
             <button onClick={() => setDetail("overview")}>
               <Sparkles size={18} /> 查看分析解读
@@ -440,7 +443,9 @@ export default function App() {
             </div>
             <div className="header-tools">
               <button className="icon" aria-label="对话文件夹" title="对话文件夹" disabled={libraryDisabled} onClick={() => setLibraryOpen(true)}><FolderOpen size={19} /></button>
-              <button className={`icon update-entry ${updates.result?.status === "available" ? "has-update" : ""}`} aria-label="版本与更新" title="版本与更新" onClick={() => setUpdatesOpen(true)}><Download size={18} /></button>
+              <button className="icon update-entry" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} title={updates.hasUpdate ? "版本与更新：有新版本可下载" : "版本与更新"} onClick={() => setUpdatesOpen(true)}>
+                <span className="update-icon"><Download size={18} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
+              </button>
               <button
                 className={`api-badge ${apiInfo?.configured ? "configured" : ""}`}
                 onClick={() => setSettings(true)}
@@ -1000,7 +1005,10 @@ export default function App() {
             ，重新打开后可继续；分析时只发送所需片段给模型服务。整份手记删除后进入回收站，可以恢复。
           </p>
           <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>重新查看使用引导</button>
-          <button className="secondary" onClick={() => { setSettings(false); setUpdatesOpen(true); }}>版本与更新 / Release 下载页</button>
+          <button className="secondary update-entry" aria-label={updates.hasUpdate ? "版本与更新 / Release 下载页，有新版本" : "版本与更新 / Release 下载页"} onClick={() => { setSettings(false); setUpdatesOpen(true); }}>
+            <span className="update-icon"><Download size={18} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
+            版本与更新 / Release 下载页
+          </button>
           <button className="secondary" disabled={libraryDisabled} onClick={() => { setSettings(false); setLibraryOpen(true); }}>打开对话文件夹</button>
         </Modal>
       )}

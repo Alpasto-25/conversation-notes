@@ -10,7 +10,8 @@ const config = parse(await readFile(join(root, '.env'), 'utf8').catch(() => ''))
 const secrets = ['JEV_API_KEY', 'TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY']
   .map(name => config[name]).filter(value => value && value.length > 8);
 const outputRoot = basename(dirname(root)) === 'outputs' ? dirname(root) : join(root, 'outputs');
-const apk = await readFile(process.argv[2] ? resolve(process.argv[2]) : join(outputRoot, 'conversation-notes-1.1.0.apk'));
+const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+const apk = await readFile(process.argv[2] ? resolve(process.argv[2]) : join(outputRoot, `conversation-notes-${version}.apk`));
 // Read the central directory, including entries that use data descriptors.
 let end = apk.length - 22;
 while (end >= Math.max(0, apk.length - 65557) && apk.readUInt32LE(end) !== 0x06054b50) end--;

@@ -10,9 +10,9 @@
 
 从 [最新 Release](https://github.com/Alpasto-25/conversation-notes/releases/latest) 下载：
 
-- Windows 安装版：`ConversationNotes-Setup-1.1.0-x64.exe`。
-- Windows 便携版：解压 `ConversationNotes-Portable-1.1.0-x64.zip`，运行 `ConversationNotes.exe`。
-- Android：`conversation-notes-1.1.0.apk`，支持 Android 8.0+。
+- Windows 安装版：`ConversationNotes-Setup-1.1.1-x64.exe`。
+- Windows 便携版：解压 `ConversationNotes-Portable-1.1.1-x64.zip`，运行 `ConversationNotes.exe`。
+- Android：`conversation-notes-1.1.1.apk`，支持 Android 8.0+。
 
 Windows 需要 Windows 10 1809 / Windows 11 和 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)，无需 Node.js。安装包未商业代码签名，Android 使用本地自用签名；请核对 Release 中的 SHA256，勿关闭系统安全防护。更新直接覆盖安装，手机不要先卸载。
 
@@ -35,7 +35,7 @@ Windows 需要 Windows 10 1809 / Windows 11 和 [WebView2 Runtime](https://devel
 
 仅支持双人文字对话，不读取聊天软件账号或数据库。图片、语音需先转为文字。
 
-“版本与更新”可手动检查并跳转下载页；自动检查在启动时及运行期间每 6 小时执行，可关闭。不会自动下载安装，退出后不后台运行。
+“版本与更新”确认有新版后显示红点，可手动检查并跳转下载页；自动检查在启动时及运行期间每 6 小时执行，可关闭。关闭提醒不会清除红点，不会自动下载安装，退出后不后台运行。
 
 ## API 与费用
 

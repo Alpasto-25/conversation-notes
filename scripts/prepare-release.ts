@@ -32,7 +32,7 @@ function buildInfo(zip: Buffer, path: string) {
 
 if (!process.argv[2] || !process.argv[3]) throw new Error("Usage: node --import tsx scripts/prepare-release.ts <outputs-directory> <reviewed-notes-file>");
 const folder = resolve(process.argv[2]), notesPath = resolve(process.argv[3]);
-const version = "1.1.0";
+const version: string = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version;
 const installerName = `ConversationNotes-Setup-${version}-x64.exe`, portableName = `ConversationNotes-Portable-${version}-x64.zip`, apkName = `conversation-notes-${version}.apk`;
 const [installer, portable, apk] = await Promise.all([installerName, portableName, apkName].map(name => readFile(join(folder, name))));
 const sha = (data: Buffer) => createHash("sha256").update(data).digest("hex");
@@ -44,7 +44,7 @@ const manifest = updateManifestSchema.parse({ schema: 1, platforms: {
   android: { ...android, asset: apkName, sha256: sha(apk) },
 } });
 const reviewed = (await readFile(notesPath, "utf8")).replace(/\n?<!--\s*conversation-notes-update:.*?\s*-->\s*/gs, "\n").trimEnd();
-if (!reviewed.includes("FerryCorleone") || !reviewed.includes("1.1.0")) throw new Error("Review Release notes and preserve upstream attribution first");
+if (!reviewed.includes("FerryCorleone") || !reviewed.includes(version)) throw new Error("Review Release notes and preserve upstream attribution first");
 await writeFile(notesPath, `${reviewed}\n\n<!-- ${UPDATE_MARKER}${JSON.stringify(manifest)} -->\n`);
 await writeFile(join(folder, `SHA256SUMS-${version}.txt`), [
   `${sha(installer)}  ${installerName}`, `${sha(portable)}  ${portableName}`, `${sha(apk)}  ${apkName}`,

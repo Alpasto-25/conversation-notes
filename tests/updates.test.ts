@@ -20,6 +20,17 @@ test("same version with a newer internal build triggers an identifiable reminder
   assert.match(result.message, /同版本/);
   assert.equal(result.reminderId, "windows:1.1.0:remote-build-0002");
 });
+test("1.1.1 patch publication updates 1.1.0 on each platform but never suggests updating itself", () => {
+  for (const platform of ["windows", "android"] as const) {
+    const release = fixture({ platform, version: "1.1.1" });
+    const previous = { ...current, platform };
+    const result = inspectRelease(release, previous);
+    assert.equal(result.status, "available");
+    assert.equal(result.version, "1.1.1");
+    assert.equal(result.reminderId, `${platform}:1.1.1:remote-build-0002`);
+    assert.equal(inspectRelease(release, { ...previous, version: "1.1.1", buildId: "remote-build-0002", builtAt: "2026-01-02T00:00:00.000Z" }).status, "current");
+  }
+});
 test("identical build and older build never trigger an update", () => {
   assert.equal(inspectRelease(fixture({ id: current.buildId }), current).status, "current");
   assert.equal(inspectRelease(fixture({ at: "2025-12-31T00:00:00.000Z" }), current).status, "current");

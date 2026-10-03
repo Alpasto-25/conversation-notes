@@ -51,6 +51,7 @@ export function useUpdates() {
   useEffect(() => () => { const job = running.current; running.current = null; job?.abort(); }, []);
   return {
     automatic, result, error, checking, checkedAt, check,
+    hasUpdate: result?.status === "available",
     showReminder: result?.status === "available" && result.reminderId !== dismissed,
     setAutomatic(value: boolean) { store(PREF, value ? "on" : "off"); setAutomatic(value); },
     dismiss() {

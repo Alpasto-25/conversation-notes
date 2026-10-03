@@ -23,7 +23,7 @@ export function UpdatesPage({ updates }: { updates: ReturnType<typeof useUpdates
     {openError && <p className="error" role="alert">{openError}</p>}
     <p className="release-address">{RELEASES_URL}</p>
     <label className="update-preference"><input type="checkbox" checked={updates.automatic} onChange={e => updates.setAutomatic(e.target.checked)} /> 自动检查应用更新</label>
-    <p>开启后，每次打开应用和运行期间每 6 小时检查一次；退出应用后不会后台运行。只读取公开 GitHub 发布信息，不发送 Key 或聊天记录，不调用模型、不消耗模型额度。</p>
+    <p>开启后，每次打开应用和运行期间每 6 小时检查一次；确认有新版时，更新入口显示红点。关闭提醒或查看下载页不会清除红点，安装新版并成功检查后才会消失。关闭应用后不会后台运行。只读取公开 GitHub 发布信息，不发送 Key 或聊天记录，不调用模型、不消耗模型额度。</p>
     <p>本软件免费使用。发现更新后会提醒你前往 Release 页，自行下载对应系统的安装包；不会自动下载或安装。API Key 由模型供应商提供，相关费用仍由用户自行承担。</p>
   </section>;
 }

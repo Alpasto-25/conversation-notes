@@ -10,9 +10,9 @@ A local-first tool for two-person text conversations: emotions, intentions, expr
 
 Get packages from the [latest Release](https://github.com/Alpasto-25/conversation-notes/releases/latest):
 
-- Windows installer: `ConversationNotes-Setup-1.1.0-x64.exe`.
-- Windows portable: extract `ConversationNotes-Portable-1.1.0-x64.zip` and run `ConversationNotes.exe`.
-- Android 8.0+: `conversation-notes-1.1.0.apk`.
+- Windows installer: `ConversationNotes-Setup-1.1.1-x64.exe`.
+- Windows portable: extract `ConversationNotes-Portable-1.1.1-x64.zip` and run `ConversationNotes.exe`.
+- Android 8.0+: `conversation-notes-1.1.1.apk`.
 
 Windows requires Windows 10 1809 / Windows 11 and [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/); Node.js is not needed. Windows packages are not commercially code-signed; Android uses a local signing certificate. Check the Release SHA256 values and keep security protections enabled. Install updates over the existing app; do not uninstall Android first.
 
@@ -35,7 +35,7 @@ Alex: Yes, at three.
 
 Two-person text only. The app does not connect to messaging accounts or read their databases; transcribe images/audio first.
 
-“版本与更新” (Version and updates) offers manual checks and a Release link. Optional automatic checks run on launch and every six hours while open. No automatic download/install or background checks after exit.
+“版本与更新” (Version and updates) shows a red dot for a confirmed update, with manual checks and a Release link. Dismissing a reminder does not clear the dot. Optional automatic checks run on launch and every six hours while open. No automatic download/install or background checks after exit.
 
 ## API and costs
 

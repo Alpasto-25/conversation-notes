@@ -11,7 +11,7 @@ $AndroidJar = Join-Path $SdkRoot 'platforms\android-36\android.jar'
 $BuildRoot = Join-Path $TaskRoot ('work\android-build\build-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $SigningRoot = Join-Path $TaskRoot 'work\android-signing'
 $SigningKey = Join-Path $SigningRoot 'notebook-local.jks'
-$ApkPath = Join-Path $TaskRoot 'outputs\conversation-notes-1.1.0.apk'
+$ApkPath = Join-Path $TaskRoot 'outputs\conversation-notes-1.1.1.apk'
 $Adb = Join-Path $SdkRoot 'platform-tools\adb.exe'
 foreach ($RequiredPath in @($AndroidJar, (Join-Path $JavaRoot 'bin\javac.exe'), (Join-Path $BuildTools 'aapt2.exe'))) {
     if (-not (Test-Path -LiteralPath $RequiredPath)) { throw "Missing Android build dependency: $RequiredPath" }

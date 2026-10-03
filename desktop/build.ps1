@@ -122,5 +122,5 @@ if (-not (Test-Path -LiteralPath $chineseLanguage)) {
 if ((Get-FileHash -LiteralPath $chineseLanguage -Algorithm SHA256).Hash -ne 'E0B0B350E2245F3C5E65586DFE43D574F6E7F06F2261149ABA284954B3FC9A8D') { throw 'Chinese installer translation SHA256 mismatch.' }
 & $iscc "/DPayload=$payload" "/DOutput=$outputRoot" "/DChineseLanguage=$chineseLanguage" (Join-Path $PSScriptRoot 'installer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Windows installer compilation failed.' }
-Compress-Archive -Path (Join-Path $payload '*') -DestinationPath (Join-Path $outputRoot 'ConversationNotes-Portable-1.1.0-x64.zip') -Force
-Write-Output "Installer: $(Join-Path $outputRoot 'ConversationNotes-Setup-1.1.0-x64.exe')"
+Compress-Archive -Path (Join-Path $payload '*') -DestinationPath (Join-Path $outputRoot 'ConversationNotes-Portable-1.1.1-x64.zip') -Force
+Write-Output "Installer: $(Join-Path $outputRoot 'ConversationNotes-Setup-1.1.1-x64.exe')"

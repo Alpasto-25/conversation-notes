@@ -1,9 +1,11 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+const appVersion: string = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
 export default defineConfig(({ mode }) => {
   const info = { schema: 1, platform: mode === "desktop" ? "windows" : mode === "mobile" ? "android" : "web",
-    version: "1.1.0", buildId: `${new Date().toISOString().replace(/[^0-9]/g, "")}-${randomUUID().slice(0, 8)}`,
+    version: appVersion, buildId: `${new Date().toISOString().replace(/[^0-9]/g, "")}-${randomUUID().slice(0, 8)}`,
     builtAt: new Date().toISOString() };
   return ({
   define: { __APP_BUILD_INFO__: JSON.stringify(info) },
