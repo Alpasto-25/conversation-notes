@@ -68,6 +68,7 @@ export function useAnalysis() {
     setOverviewFresh(false);
     setError("");
     setLatency(0);
+    setProgress({ done: 0, total: 0 });
     setAnalyzedCount(0);
   }
   function restore(s: SavedConversation) {

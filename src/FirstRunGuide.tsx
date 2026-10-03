@@ -37,6 +37,7 @@ export function FirstRunGuide({ finish, configure }: { finish: () => void; confi
           <ol className="guide-instructions">
             <li>先选择合适的分析场景，再粘贴“我：内容 / 对方：内容”，或导入 UTF-8 的 .txt、.md、.log 文件。</li>
             <li>支持微信、QQ、WhatsApp 及其他双人文字对话；确认哪个昵称代表你，再点击“开始分析”。</li>
+            <li>不同对象保存为独立手记，也可先只保存、不分析。“对话文件夹”按场景和对象分类，切换后直接恢复已保存结果，不再次消耗额度。</li>
             <li>也可以先用示例了解操作。示例真正开始分析时同样会调用 API，并可能产生模型费用。</li>
           </ol>
           <p>不会自动读取任何聊天软件。记录在本机保存；分析所需的文字片段会发送给你选择的模型服务。请先去掉不希望分享的隐私内容。</p>
@@ -49,7 +50,7 @@ export function FirstRunGuide({ finish, configure }: { finish: () => void; confi
             <li>评分和建议只作参考，不代表对方真实内心，也不替你作重要决定。</li>
             <li>重新打开可以继续本机记录；电脑应用、原浏览器和手机的记录分别保存，目前不会自动同步。</li>
           </ol>
-          <p>需要重看时，打开“分析设置 → 重新查看使用引导”。清空聊天会删除当前记录，请谨慎确认。</p>
+          <p>新建手记会保留旧记录；删除只影响确认的当前手记。需要重看教程时，打开“分析设置 → 重新查看使用引导”。</p>
         </>}
       </div>
       <div className="guide-actions">

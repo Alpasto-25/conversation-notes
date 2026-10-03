@@ -22,6 +22,8 @@ Windows requires Windows 10 1809 / Windows 11 and [WebView2 Runtime](https://dev
 2. Choose a scene, paste or import text, and identify your own name.
 3. Click “开始分析” (Analyze); add more messages to continue.
 
+Conversation folders group separate notebooks by scene and person. Creating a notebook keeps previous records; switching restores saved text and analysis without model calls. Imports can also be saved without analysis.
+
 WeChat, QQ, and common WhatsApp text formats are supported. For other sources, use:
 
 ```text

@@ -1,9 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
-  loadConversation,
-  saveConversation,
-  type SavedConversation,
-} from "./storage";
+import { useNotebooks } from "./useNotebooks";
+import { ConversationFolders } from "./ConversationFolders";
+import { emptyConversation } from "./notebooks";
 import { INTENTS, topIntents } from "../shared/intents";
 import { REPLY_RATINGS, replyRating } from "../shared/ratings";
 import { EMOTIONS, topEmotions } from "../shared/labels";
@@ -33,10 +31,11 @@ import {
   BookOpen,
   Sparkles,
   Download,
+  FolderOpen,
+  Pencil,
 } from "lucide-react";
 import { parseChat, toMessages, mergeMessages } from "../shared/parser";
 import {
-  RUBRIC,
   ACTIONS,
   RELATIONS,
   STAGES,
@@ -120,13 +119,15 @@ function Modal({
 }
 export default function App() {
   const a = useAnalysis();
+  const notebooks = useNotebooks(a);
+  const { messages, setMessages, input, setInput, self, setSelf, other, setOther, relation,
+    ready, storageError, switching, changeRelation } = notebooks;
   const updates = useUpdates();
   const [updatesOpen, setUpdatesOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]),
-    [input, setInput] = useState(""),
-    [self, setSelf] = useState(""),
-    [other, setOther] = useState("对方"),
-    [relation, setRelation] = useState<Relation>("general");
+  const [libraryOpen, setLibraryOpen] = useState(false), [editingNotebook, setEditingNotebook] = useState(false);
+  const [editTitle, setEditTitle] = useState(""), [editContact, setEditContact] = useState("");
+  const [importScene, setImportScene] = useState<Relation>("general"), [importTarget, setImportTarget] = useState<"new" | "append">("new"),
+    [importTitle, setImportTitle] = useState("");
   const [raw, setRaw] = useState(""),
     [parsed, setParsed] = useState<Parsed[]>([]),
     [role, setRole] = useState(""),
@@ -135,8 +136,6 @@ export default function App() {
     [detail, setDetail] = useState<string | null>(null),
     [notice, setNotice] = useState("");
   const [overlap, setOverlap] = useState<Message[] | null>(null);
-  const [ready, setReady] = useState(false),
-    [storageError, setStorageError] = useState("");
   const [apiInfo, setApiInfo] = useState<ApiStatus | null>(null);
   const [onboarding, setOnboarding] = useState(() => {
     try { return shouldShowOnboarding(window.localStorage); }
@@ -166,6 +165,8 @@ export default function App() {
   }, []);
   useEffect(() => {
     window.__notebookBack = () => {
+      if (editingNotebook) { setEditingNotebook(false); return true; }
+      if (libraryOpen) { setLibraryOpen(false); return true; }
       if (updatesOpen) { setUpdatesOpen(false); return true; }
       if (onboarding) {
         finishGuide();
@@ -192,7 +193,7 @@ export default function App() {
     return () => {
       delete window.__notebookBack;
     };
-  }, [overlap, importing, settings, detail, onboarding, updatesOpen]);
+  }, [overlap, importing, settings, detail, onboarding, updatesOpen, libraryOpen, editingNotebook]);
   const scroller = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const virtual = useVirtualizer({
@@ -205,102 +206,12 @@ export default function App() {
     followOnAppend: true,
     scrollEndThreshold: 100,
   });
-  useEffect(() => {
-    let live = true;
-    loadConversation()
-      .then((saved) => {
-        if (!live) return;
-        if (saved?.schema === 1) {
-          setMessages(saved.messages);
-          setSelf(saved.self);
-          setOther(saved.other);
-          setRelation(saved.relation);
-          a.restore(saved);
-          if (saved.rubric !== RUBRIC)
-            setNotice(
-              "对话已保留，分析规则已更新。请选择场景，再点击继续分析。旧评分需要重新计算。",
-            );
-        }
-        setReady(true);
-      })
-      .catch(() => {
-        if (live) {
-          setStorageError(
-            "本机记录读取失败，请检查浏览器存储权限。为避免覆盖旧记录，暂不自动保存。",
-          );
-          setReady(true);
-        }
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
-  const pendingSave = useRef<SavedConversation | null>(null),
-    saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null),
-    lastSavedMessages = useRef<Message[] | null>(null);
-  const flushSave = () => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = null;
-    void saveConversation(pendingSave.current).catch(() =>
-      setStorageError(
-        "本机保存失败，可能存储空间不足。当前页面仍可使用，请勿刷新以免丢失未保存记录。",
-      ),
-    );
-  };
-  useEffect(() => {
-    if (!ready || storageError) return;
-    pendingSave.current = messages.length
-      ? {
-          schema: 1,
-          rubric: RUBRIC,
-          messages,
-          self,
-          other,
-          relation,
-          lines: a.lines,
-          events: a.events,
-          overview: a.overview,
-          trend: a.trend,
-          analyzedCount: a.analyzedCount,
-          completed: a.status === "complete",
-        }
-      : null;
-    if (lastSavedMessages.current !== messages || a.status !== "loading") {
-      lastSavedMessages.current = messages;
-      flushSave();
-    } else if (!saveTimer.current)
-      saveTimer.current = setTimeout(flushSave, 750);
-  }, [
-    ready,
-    messages,
-    self,
-    other,
-    relation,
-    a.lines,
-    a.events,
-    a.overview,
-    a.trend,
-    a.analyzedCount,
-    a.status,
-  ]);
-  useEffect(() => {
-    const flush = () => {
-      if (saveTimer.current) flushSave();
-    };
-    window.addEventListener("pagehide", flush);
-    document.addEventListener("visibilitychange", flush);
-    return () => {
-      window.removeEventListener("pagehide", flush);
-      document.removeEventListener("visibilitychange", flush);
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
-  }, []);
   const stay = useRef(true);
   useEffect(() => {
     if (messages.length && stay.current)
       virtual.scrollToIndex(messages.length - 1, { align: "end" });
   }, [messages.length]);
-  const busy = a.status === "loading",
+  const busy = a.status === "loading" || switching,
     ov = a.overview,
     value = ov?.affinity.value,
     quality = meanQuality(messages, a.lines);
@@ -317,16 +228,6 @@ export default function App() {
     setInput("");
     a.run(ms, relation);
   }
-  function changeRelation(next: Relation) {
-    if (next === relation) return;
-    setRelation(next);
-    a.reset();
-    setNotice(
-      messages.length
-        ? "场景已更换，对话已保留。点击继续分析，按新场景重新评价。"
-        : "",
-    );
-  }
   async function importFile(file: File) {
     if (file.size > 1000000) {
       setNotice("文本文件超过 1 MB，请分成较小的片段导入。");
@@ -342,7 +243,7 @@ export default function App() {
         setNotice("这个文件没有可读取的文字。");
         return;
       }
-      prepare(text);
+      prepare(text, true, file.name.replace(/\.(txt|md|log)$/i, ""));
     } catch {
       setNotice("文本文件读取失败，请重试或直接粘贴内容。");
     }
@@ -361,7 +262,8 @@ export default function App() {
     setNotice("");
     start(m.messages);
   }
-  function prepare(text: string) {
+  function prepare(text: string, separate = false, title = "") {
+    if (!ready || busy || storageError) return;
     if (!text.trim()) return;
     if (text.length > 250000) {
       setNotice("这次粘贴超过25万字符，请分几次追加；历史记录不会被截断。");
@@ -371,6 +273,7 @@ export default function App() {
     const names = [...new Set(p.messages.map((x) => x.speaker))];
     if (
       messages.length &&
+      !separate &&
       self &&
       !p.warnings.length &&
       names.every((n) => n === self || n === other)
@@ -381,32 +284,47 @@ export default function App() {
     setRaw(text);
     setParsed(p.messages);
     setRole(names.includes(self) ? self : names.includes("我") ? "我" : "");
+    setImportScene(relation);
+    setImportTarget(!separate && messages.length && names.every((n) => n === self || n === other) ? "append" : "new");
+    setImportTitle(title);
     setImporting(true);
   }
-  function confirmImport() {
+  async function confirmImport(analyze = true) {
     const names = [...new Set(parsed.map((x) => x.speaker))];
-    setSelf(role);
-    setOther(names.find((n) => n !== role) || "对方");
+    const nextOther = names.find((n) => n !== role) || "对方";
+    const imported = toMessages(parsed, role);
+    if (importTarget === "append" && canAppend) {
+      setImporting(false);
+      if (analyze) add(imported);
+      else {
+        const merged = mergeMessages(messages, imported);
+        if (merged.ambiguous) { setNotice("存在可能重复的记录。请用开始分析的导入流程确认合并方式，或保存为新手记。"); return; }
+        const saved = { ...notebooks.snapshot(), messages: merged.messages, completed: false };
+        setMessages(merged.messages); setInput(""); a.restore(saved);
+      }
+      return;
+    }
+    const conversation = { ...emptyConversation(importScene), messages: imported, self: role, other: nextOther };
+    const note = await notebooks.create(conversation, importTitle || `${nextOther}的对话手记`, nextOther);
+    if (!note) return;
     setImporting(false);
-    add(toMessages(parsed, role));
+    setNotice(""); setDetail(null); setOverlap(null);
+    if (analyze) void a.run(imported, importScene);
   }
-  function clear() {
-    a.reset();
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = null;
-    pendingSave.current = null;
-    void saveConversation(null)
-      .then(() => setStorageError(""))
-      .catch(() => setStorageError("本机记录删除失败，请重试清空。"));
-    setMessages([]);
-    setInput("");
-    setSelf("");
-    setOther("对方");
-    setNotice("");
-    setSettings(false);
-    setDetail(null);
+  function resetViews() {
+    setNotice(""); setSettings(false); setDetail(null); setOverlap(null); setImporting(false); setLibraryOpen(false);
+    stay.current = true;
+  }
+  async function createNotebook() { if (await notebooks.create()) resetViews(); }
+  async function selectNotebook(id: string) { if (id === notebooks.active?.id) { setLibraryOpen(false); return; } if (await notebooks.select(id)) resetViews(); }
+  async function clear() { if (await notebooks.removeCurrent()) resetViews(); }
+  function editNotebook() {
+    setEditTitle(notebooks.active?.title || ""); setEditContact(notebooks.active?.contact || other); setEditingNotebook(true);
   }
   const names = [...new Set(parsed.map((x) => x.speaker))];
+  const canAppend = !!messages.length && role === self && names.every((name) => name === self || name === other) && importScene === relation;
+  const libraryDisabled = !ready || switching || !!storageError;
+  const importInvalid = busy || !!storageError || !role || !parsed.length || names.length > 2 || names.includes("未分配") || (!names.includes(role) && role !== "__self_absent__");
   const chosen = messages.find((m) => m.id === detail),
     result = detail ? a.lines[detail] : undefined;
   return (
@@ -436,6 +354,9 @@ export default function App() {
               <MessageCircle size={18} /> 当前对话
               <span className="nav-count">{messages.length || "01"}</span>
             </button>
+            <button disabled={libraryDisabled} onClick={() => void createNotebook()}><Plus size={18} /> 新建手记，保留旧记录</button>
+            <ConversationFolders compact items={notebooks.items} activeId={notebooks.active?.id} disabled={libraryDisabled}
+              select={(id) => void selectNotebook(id)} create={() => void createNotebook()} />
             <button
               disabled={!ready || busy}
               onClick={() => fileInput.current?.click()}
@@ -485,6 +406,7 @@ export default function App() {
               <strong>对话手记</strong>
             </div>
             <div className="header-tools">
+              <button className="icon" aria-label="对话文件夹" title="对话文件夹" disabled={libraryDisabled} onClick={() => setLibraryOpen(true)}><FolderOpen size={19} /></button>
               <button className={`icon update-entry ${updates.result?.status === "available" ? "has-update" : ""}`} aria-label="版本与更新" title="版本与更新" onClick={() => setUpdatesOpen(true)}><Download size={18} /></button>
               <button
                 className={`api-badge ${apiInfo?.configured ? "configured" : ""}`}
@@ -499,9 +421,10 @@ export default function App() {
               </button>
               <button
                 className="icon"
-                aria-label="新聊天"
-                title="新聊天"
-                onClick={() => setDetail("clear")}
+                aria-label="新建对话手记"
+                title="新建手记，保留当前记录"
+                disabled={libraryDisabled}
+                onClick={() => void createNotebook()}
               >
                 <Plus size={20} />
               </button>
@@ -521,7 +444,7 @@ export default function App() {
               </div>
               <h1>
                 {messages.length ? (
-                  `${other}的对话手记`
+                  notebooks.active?.title || `${other}的对话手记`
                 ) : (
                   <>
                     让对话，多一点<span className="title-highlight">理解</span>
@@ -541,6 +464,7 @@ export default function App() {
                     className="scene-select"
                     aria-label="分析场景"
                     value={relation}
+                    disabled={!ready || switching || !!storageError}
                     onChange={(e) => changeRelation(e.target.value as Relation)}
                   >
                     {Object.entries(RELATIONS).map(([key, label]) => (
@@ -554,6 +478,7 @@ export default function App() {
                   <ShieldCheck size={13} />
                   {storageError ? "保存异常" : "仅在本机保存"}
                 </span>
+                {messages.length > 0 && <button className="text-button organize-notebook" disabled={libraryDisabled} onClick={editNotebook}><Pencil size={13} /> 整理手记</button>}
               </div>
               {updates.showReminder && <div className="update-reminder" role="status">
                 <span>有新的{isMobile ? "手机版" : isDesktop ? "电脑版" : "应用"}可下载</span>
@@ -830,7 +755,7 @@ export default function App() {
             </div>
             <textarea
               aria-label="粘贴聊天记录"
-              disabled={!ready}
+              disabled={!ready || switching || !!storageError}
               placeholder={
                 messages.length
                   ? "粘贴新的聊天，自动合并重复记录"
@@ -853,7 +778,8 @@ export default function App() {
             />
             <div className="composer-bottom">
               <div className="composer-feedback">
-                <span role="status">{storageError || notice}</span>{" "}
+                <span role="status">{storageError || notice || notebooks.workspaceNotice}</span>{" "}
+                {storageError && notebooks.active && <button className="text-button" onClick={() => void notebooks.retrySave()}>重试保存</button>}
                 <div className="analysis-status" aria-live="polite">
                   {busy ? (
                     <>
@@ -890,7 +816,7 @@ export default function App() {
               </div>
               <button
                 className="send"
-                disabled={!input.trim()}
+                disabled={!input.trim() || busy || !!storageError || !ready}
                 onClick={() => prepare(input)}
               >
                 <Sparkles size={15} />
@@ -905,8 +831,8 @@ export default function App() {
           <label className="field">
             本次分析场景
             <select
-              value={relation}
-              onChange={(e) => changeRelation(e.target.value as Relation)}
+              value={importScene}
+              onChange={(e) => setImportScene(e.target.value as Relation)}
             >
               {Object.entries(RELATIONS).map(([key, label]) => (
                 <option key={key} value={key}>
@@ -936,6 +862,15 @@ export default function App() {
               </button>
             )}
           </div>
+          <label className="field">保存到
+            <select aria-label="导入保存方式" value={canAppend ? importTarget : "new"} onChange={(e) => setImportTarget(e.target.value as "new" | "append")}>
+              <option value="new">新建独立手记（保留原记录）</option>
+              {canAppend && <option value="append">追加到当前手记</option>}
+            </select>
+          </label>
+          {(importTarget === "new" || !canAppend) && <label className="field">手记名称
+            <input aria-label="导入手记名称" maxLength={100} value={importTitle} placeholder="留空则按聊天对象命名" onChange={(e) => setImportTitle(e.target.value)} />
+          </label>}
           <label className="field">
             识别到 {parsed.length} 条聊天
             <textarea
@@ -953,17 +888,13 @@ export default function App() {
           )}
           <button
             className="primary"
-            disabled={
-              !role ||
-              !parsed.length ||
-              names.length > 2 ||
-              names.includes("未分配") ||
-              (!names.includes(role) && role !== "__self_absent__")
-            }
-            onClick={confirmImport}
+            disabled={importInvalid}
+            onClick={() => void confirmImport()}
           >
             开始分析
           </button>
+          <button className="secondary" disabled={importInvalid} onClick={() => void confirmImport(false)}>只保存记录，暂不分析</button>
+          <p className="folder-help">不同聊天对象会保存为独立手记；旧记录和分析保留在对话文件夹中。只有点击开始分析才会调用模型。</p>
         </Modal>
       )}
       {ready && onboarding && (
@@ -998,8 +929,7 @@ export default function App() {
             </select>
           </label>
           <p>
-            场景会影响评分维度、回复评价和下一步建议。更换场景后点击继续分析，使用少量
-            API 额度。
+            各场景的分析分别保存。切回已分析且原文未变的场景会直接恢复；新场景需要点击继续分析，才消耗 API 额度。
           </p>
           <button
             className="secondary"
@@ -1027,29 +957,40 @@ export default function App() {
               setDetail("clear");
             }}
           >
-            清空聊天，重新开始
+            删除当前手记
           </button>
           <p>
             已保存 {messages.length.toLocaleString()} 条聊天。记录保存在
             {isMobile ? "这部手机" : isDesktop ? "这台电脑的应用中" : "本机浏览器"}
-            ，重新打开后可继续；分析时只发送所需片段给模型服务。清空会删除本机记录。
+            ，重新打开后可继续；分析时只发送所需片段给模型服务。删除仅影响当前手记，不会删除其他对象的记录。
           </p>
           <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>重新查看使用引导</button>
           <button className="secondary" onClick={() => { setSettings(false); setUpdatesOpen(true); }}>版本与更新 / Release 下载页</button>
+          <button className="secondary" disabled={libraryDisabled} onClick={() => { setSettings(false); setLibraryOpen(true); }}>打开对话文件夹</button>
         </Modal>
       )}
       {updatesOpen && <Modal title="版本与更新" close={() => setUpdatesOpen(false)}><UpdatesPage updates={updates} /></Modal>}
       {detail === "clear" && (
-        <Modal title="开始新的聊天？" close={() => setDetail(null)}>
-          <p>当前聊天、分析和本机保存的记录都会删除。</p>
-          <button className="primary" onClick={clear}>
-            开始新聊天
+        <Modal title="删除当前手记？" close={() => setDetail(null)}>
+          <p>只删除「{notebooks.active?.title}」的原文和分析，其他手记不会受影响。此操作不可撤销。如只想换对象，请选择新建手记。</p>
+          <button className="primary" disabled={libraryDisabled} onClick={() => void clear()}>
+            确认删除当前手记
           </button>
           <button className="secondary" onClick={() => setDetail(null)}>
             保留当前聊天
           </button>
         </Modal>
       )}
+      {libraryOpen && <Modal title="对话文件夹" close={() => setLibraryOpen(false)}>
+        <ConversationFolders items={notebooks.items} activeId={notebooks.active?.id} disabled={libraryDisabled}
+          select={(id) => void selectNotebook(id)} create={() => void createNotebook()} />
+      </Modal>}
+      {editingNotebook && <Modal title="整理当前手记" close={() => setEditingNotebook(false)}>
+        <label className="field">手记名称<input aria-label="手记名称" maxLength={100} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /></label>
+        <label className="field">聊天对象分类<input aria-label="聊天对象分类" maxLength={80} value={editContact} onChange={(e) => setEditContact(e.target.value)} /></label>
+        <p>归入「{RELATIONS[relation]} → {editContact || other}」。这里只修改分类名称，不改原文和分析，也不调用模型。</p>
+        <button className="primary" disabled={libraryDisabled || !editTitle.trim() || !editContact.trim()} onClick={() => { notebooks.rename(editTitle, editContact); setEditingNotebook(false); }}>保存名称与分类</button>
+      </Modal>}
       {detail && detail !== "clear" && (
         <Modal
           title={
