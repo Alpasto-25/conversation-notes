@@ -213,6 +213,8 @@ namespace ConversationNotes
             string opened = null;
             ReleaseClient.Open(value => opened = value);
             Check(opened == ReleaseClient.Page, "Release opener is fixed, independent of provider allowlist");
+            ReleaseClient.OpenQuark(value => opened = value);
+            Check(opened == "https://pan.quark.cn/s/7894e2647abc?pwd=LQxA", "Quark opens only the fixed public resource folder");
             int releaseCalls = 0;
             FakeHttp releaseHttp = new FakeHttp();
             releaseHttp.Run = async (request, token) => {
@@ -229,6 +231,8 @@ namespace ConversationNotes
                 Check(releaseCalls == 1 && Json.Text((Dictionary<string, object>)results[0], "tag_name") == "v1.1.0", "parallel release checks share successful cache");
                 await releases.Check(CancellationToken.None);
                 Check(releaseCalls == 1, "release cache protects GitHub rate limit");
+                await releases.Check(CancellationToken.None, true);
+                Check(releaseCalls == 2, "manual check bypasses settled release cache");
             }
             foreach (HttpResponseMessage response in new[] {
                 new HttpResponseMessage(HttpStatusCode.Forbidden) { Content = new StringContent(TestKey) },

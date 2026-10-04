@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 export const RELEASES_URL = "https://github.com/Alpasto-25/conversation-notes/releases/latest";
+export const QUARK_DOWNLOAD_URL = "https://pan.quark.cn/s/7894e2647abc?pwd=LQxA";
+export const QUARK_EXTRACTION_CODE = "LQxA";
 export const RELEASE_API = "https://api.github.com/repos/Alpasto-25/conversation-notes/releases/latest";
 export const UPDATE_MARKER = "conversation-notes-update:";
 export const UPDATE_INTERVAL = 6 * 60 * 60 * 1000;

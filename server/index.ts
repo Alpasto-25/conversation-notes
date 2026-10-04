@@ -17,9 +17,9 @@ app.use((_req, res, next) => {
 });
 app.get("/api/health", (_req, res) => res.json(providerStatus()));
 const checkRelease = createReleaseChecker();
-app.get("/api/updates", async (_req, res) => {
-  try { res.json(await checkRelease()); }
-  catch { res.status(502).json({ error: "更新检查暂不可用，请检查网络或直接查看 Release 页。" }); }
+app.get("/api/updates", async (req, res) => {
+  try { res.json(await checkRelease(req.query.fresh === "1")); }
+  catch { res.status(502).json({ error: "更新检查暂不可用，请检查网络后重试，也可直接前往夸克网盘下载。" }); }
 });
 let calls = 0;
 let windowAt = Date.now();

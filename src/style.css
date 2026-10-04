@@ -523,6 +523,10 @@ h3 {
 .update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .update-actions > button { width: auto; margin: 0; }
 .release-address { font-size: var(--font-11); overflow-wrap: anywhere; user-select: text; }
+.download-code { user-select: text; }
+.update-spinner { animation: update-spin 1s linear infinite; }
+@keyframes update-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .update-spinner { animation: none; } }
 .update-preference { display: flex; align-items: center; gap: 10px; margin-top: 24px; font-size: var(--font-13); }
 .update-preference input { width: 18px; height: 18px; accent-color: var(--accent); }
 .document-head {

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildInfoSchema, compareVersions, inspectRelease, RELEASES_URL, UPDATE_MARKER, type BuildInfo } from "../shared/updates";
+import { buildInfoSchema, compareVersions, inspectRelease, RELEASES_URL, QUARK_DOWNLOAD_URL, QUARK_EXTRACTION_CODE, UPDATE_MARKER, type BuildInfo } from "../shared/updates";
+import { readFile } from "node:fs/promises";
 import { createReleaseChecker } from "../server/updates";
 
 const current: BuildInfo = { schema: 1, platform: "windows", version: "1.1.0", buildId: "local-build-0001", builtAt: "2026-01-01T00:00:00.000Z" };
@@ -99,5 +100,34 @@ test("upstream failures, oversized bodies and invalid JSON are safe, bounded and
     await assert.rejects(checker(), error => error instanceof Error && !error.message.includes("synthetic-private-body"));
     await assert.rejects(checker());
     assert.equal(count, 1);
+  }
+});
+test("a manual update check bypasses settled success and failure caches, but joins an active request", async () => {
+  let calls = 0;
+  const checker = createReleaseChecker((async () => {
+    calls++;
+    await new Promise(resolve => setTimeout(resolve, 5));
+    return calls === 1 ? new Response("not available", {status:503}) : Response.json(fixture({version:`1.1.${calls}`}));
+  }) as typeof fetch);
+  await assert.rejects(checker());
+  await assert.rejects(checker());
+  assert.equal(calls, 1);
+  const [manual, concurrent] = await Promise.all([checker(true), checker(true)]);
+  assert.deepEqual(manual, concurrent);
+  assert.equal(calls, 2);
+  assert.equal((manual as {tag_name:string}).tag_name, 'v1.1.2');
+  await checker();
+  assert.equal(calls, 2);
+  assert.equal((await checker(true) as {tag_name:string}).tag_name, 'v1.1.3');
+  assert.equal(calls, 3);
+});
+test("native download methods and UI point at the same fixed Quark share", async () => {
+  const url = new URL(QUARK_DOWNLOAD_URL);
+  assert.equal(url.origin, 'https://pan.quark.cn');
+  assert.equal(url.searchParams.get('pwd'), QUARK_EXTRACTION_CODE);
+  for (const file of ['../desktop/Main.cs','../android/src/local/conversation/notes/MainActivity.java']) {
+    const source = await readFile(new URL(file, import.meta.url), 'utf8');
+    assert(source.includes(`\"${QUARK_DOWNLOAD_URL}\"`));
+    assert(source.includes('\"openQuark\"'));
   }
 });

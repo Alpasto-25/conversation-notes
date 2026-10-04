@@ -2,6 +2,10 @@
 
 1.1.2 起，默认在应用启动及每 6 小时检查公开发布；发现有效新版时显示弹窗。已有引导、设置、侧栏或分析任务时延后提醒，避免叠加弹窗。“稍后再说”仅影响当前打开期间；“此版本不再提醒”按平台、版本和构建记住选择，不影响后续新构建。断网、无效发布、草稿或缺失附件不会误报更新。
 
+1.1.2 的下载入口修订提供[夸克资源文件夹](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA)（提取码 `LQxA`），更新弹窗及“版本与更新”均可直接进入，GitHub 保留为备用下载。文件夹由维护者上传对应安装包；安装包与校验文件必须和公开发布一致。更新元信息仍由固定 GitHub 公开接口获取，网络受限时会明确显示检查失败，但不影响进入网盘下载。
+
+手动检查会跳过已完成的一分钟缓存，自动检查仍复用缓存；进行中的服务器请求合并，按钮检查期间禁用。界面持续显示检查结果，并将反馈区域滚入可见位置。1.1.1 未包含启动弹窗代码，需先手动覆盖安装 1.1.2 才能获得今后的启动提醒。
+
 本功能由非官方 Fork 增加；首先感谢 FerryCorleone/crush-monitor 提供的卓越设计与工程基础。原作者不为本功能或安装包背书，原 MIT 许可保留。
 
 ## 客户端行为
@@ -12,7 +16,7 @@ Windows 和 Android 的“版本与更新”页可手动检查或打开固定地
 
 只请求 `https://api.github.com/repos/Alpasto-25/conversation-notes/releases/latest`。Native GET 无 Authorization、请求正文或 Cookie，独立于模型配置和额度预算，禁止重定向，响应上限 128 KiB，成功及失败短缓存约六十秒。Windows/Node 使用十秒总截止；Android 连接和读取超时各十秒。客户端不发送 Key、聊天或设备标识；GitHub 会收到正常网络 IP 和固定 User-Agent。错误仅显示安全提示，不回显上游正文。
 
-页面继续禁止跨网请求；不扩大九个供应商入口白名单。`openRelease` 是独立原生桥方法，无任意 URL 参数。网页版通过本机 `/api/updates` 转发固定请求；网页版需从最新源码重新部署，而不是安装原生包。
+页面继续禁止跨网请求；不扩大九个供应商入口白名单。`openRelease` 和 `openQuark` 是独立原生桥方法，无任意 URL 参数，分别只打开固定发布页及维护者的固定资源分享链接。网页版通过本机 `/api/updates` 转发固定请求；网页版需从最新源码重新部署，而不是安装原生包。
 
 ## 同版本构建识别
 
@@ -29,7 +33,7 @@ Vite 为每次构建生成平台、可见版本、唯一 `buildId` 和 UTC `buil
 3. 运行下列命令（路径相对于标准 checkout）：
 
    ```powershell
-   node --import tsx scripts/prepare-release.ts outputs outputs/Release-notes-1.1.1.md
+   node --import tsx scripts/prepare-release.ts outputs outputs/Release-notes-1.1.2.md
    ```
 
    早期外层 `outputs/crush-monitor` 布局使用上一级 `outputs`。脚本使用 `package.json` 的版本，从便携 ZIP/APK 内读取真实构建信息，并生成说明末尾的机器注释与对应版本的校验表，本身不上传任何数据。

@@ -17,7 +17,7 @@ export function useUpdates() {
   const [checkedAt, setCheckedAt] = useState<number | null>(null);
   const running = useRef<AbortController | null>(null);
   const lastAttempt = useRef(0);
-  const check = useCallback(async () => {
+  const check = useCallback(async (fresh = false) => {
     if (running.current) return;
     const controller = new AbortController();
     running.current = controller;
@@ -25,7 +25,7 @@ export function useUpdates() {
     setChecking(true);
     setError("");
     try {
-      const value = inspectRelease(await checkUpdates(controller.signal), APP_BUILD);
+      const value = inspectRelease(await checkUpdates(controller.signal, fresh), APP_BUILD);
       if (!controller.signal.aborted) { setResult(value); setCheckedAt(Date.now()); }
     } catch (failure) {
       if (!controller.signal.aborted) setError(failure instanceof Error ? failure.message : "更新检查暂不可用，请稍后重试。");

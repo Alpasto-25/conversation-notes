@@ -2,7 +2,7 @@ import type { AnalysisRequest } from "../shared/types";
 import { ProviderError } from "../shared/provider-contract";
 import { evaluateWithDeepseekRepair } from "../shared/deepseek";
 import { isOfficialProviderUrl } from "../shared/provider-guides";
-import { RELEASES_URL, type BuildInfo } from "../shared/updates";
+import { RELEASES_URL, QUARK_DOWNLOAD_URL, type BuildInfo } from "../shared/updates";
 
 declare const __APP_BUILD_INFO__: BuildInfo;
 export const APP_BUILD = __APP_BUILD_INFO__;
@@ -134,15 +134,20 @@ export function openOfficialProviderPage(url: string) {
   if (!isOfficialProviderUrl(url)) return Promise.reject(new Error("只允许打开已核对的供应商官方入口。"));
   return nativeCall<{ opened: boolean }>("openExternal", { url });
 }
-export async function checkUpdates(signal?: AbortSignal): Promise<unknown> {
-  if (isNative) return nativeCall("checkUpdates", {}, signal);
-  const response = await fetch("/api/updates", { signal, credentials: "omit" });
-  if (!response.ok) throw new Error("更新检查暂不可用，请检查网络或直接查看 Release 页。");
+export async function checkUpdates(signal?: AbortSignal, fresh = false): Promise<unknown> {
+  if (isNative) return nativeCall("checkUpdates", fresh ? { fresh: true } : {}, signal);
+  const response = await fetch(`/api/updates${fresh ? "?fresh=1" : ""}`, { signal, credentials: "omit", cache: "no-store" });
+  if (!response.ok) throw new Error("更新检查暂不可用，请检查网络后重试，也可直接前往夸克网盘下载。");
   return response.json();
 }
 export function openReleasePage(): Promise<unknown> {
   if (isNative) return nativeCall("openRelease");
   window.open(RELEASES_URL, "_blank", "noopener,noreferrer");
+  return Promise.resolve();
+}
+export function openQuarkDownloadPage(): Promise<unknown> {
+  if (isNative) return nativeCall("openQuark");
+  window.open(QUARK_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
   return Promise.resolve();
 }
 export async function checkMobileConnection() {

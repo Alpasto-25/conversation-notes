@@ -66,6 +66,7 @@ import { FirstRunGuide } from "./FirstRunGuide";
 import { markOnboardingSeen, shouldShowOnboarding } from "../shared/provider-guides";
 import { useUpdates } from "./useUpdates";
 import { UpdatesPage } from "./UpdatesPage";
+import { UpdateDownloads } from "./UpdateDownloads";
 import { useAppearance } from "./useAppearance";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { APP_BUILD } from "./platform";
@@ -1094,9 +1095,9 @@ export default function App() {
             ，重新打开后可继续；分析时只发送所需片段给模型服务。整份手记删除后进入回收站，可以恢复。
           </p>
           <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>重新查看使用引导</button>
-          <button className="secondary update-entry" aria-label={updates.hasUpdate ? "版本与更新 / Release 下载页，有新版本" : "版本与更新 / Release 下载页"} onClick={() => { setSettings(false); setUpdatesOpen(true); }}>
+          <button className="secondary update-entry" aria-label={updates.hasUpdate ? "版本与更新 / 下载安装，有新版本" : "版本与更新 / 下载安装"} onClick={() => { setSettings(false); setUpdatesOpen(true); }}>
             <span className="update-icon"><Download size={18} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
-            版本与更新 / Release 下载页
+            版本与更新 / 下载安装
           </button>
           <button className="secondary" disabled={libraryDisabled} onClick={() => { setSettings(false); setLibraryOpen(true); }}>打开对话文件夹</button>
         </Modal>
@@ -1109,8 +1110,9 @@ export default function App() {
         <p>查看更新说明，下载对应系统的安装包即可更新。应用不会自动下载或安装，现有记录继续保存在本机。</p>
         <div className="update-actions">
           <button className="secondary" onClick={updates.snooze}>稍后再说</button>
-          <button className="primary" onClick={() => { updates.snooze(); setUpdatesOpen(true); }}><Download size={16} /> 查看更新</button>
+          <button className="secondary" onClick={() => { updates.snooze(); setUpdatesOpen(true); }}>查看更新说明</button>
         </div>
+        <UpdateDownloads />
         <button className="text-button" onClick={updates.dismiss}>此版本不再提醒</button>
       </Modal>}
       {notebookDelete && <Modal title={notebookDelete.permanent ? "彻底删除手记？" : "删除手记？"} close={() => setNotebookDelete(null)}>

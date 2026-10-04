@@ -10,7 +10,7 @@ A local-first tool for two-person text conversations: emotions, intentions, expr
 
 ## Download
 
-Get packages from the [latest Release](https://github.com/Alpasto-25/conversation-notes/releases/latest):
+Get packages from the [Quark resource folder](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA), extraction code `LQxA`. The [latest GitHub Release](https://github.com/Alpasto-25/conversation-notes/releases/latest) remains available for backup downloads and release notes:
 
 - Windows installer: `ConversationNotes-Setup-1.1.2-x64.exe`.
 - Windows portable: extract `ConversationNotes-Portable-1.1.2-x64.zip` and run `ConversationNotes.exe`.

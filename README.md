@@ -8,7 +8,7 @@
 
 ## 下载与安装
 
-从 [最新 Release](https://github.com/Alpasto-25/conversation-notes/releases/latest) 下载：
+从 [夸克网盘资源入口](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA) 下载，提取码 `LQxA`；[最新 GitHub Release](https://github.com/Alpasto-25/conversation-notes/releases/latest) 提供备用下载和更新说明：
 
 - Windows 安装版：`ConversationNotes-Setup-1.1.2-x64.exe`。
 - Windows 便携版：解压 `ConversationNotes-Portable-1.1.2-x64.zip`，运行 `ConversationNotes.exe`。

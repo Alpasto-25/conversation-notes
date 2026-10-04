@@ -64,6 +64,7 @@ public final class MainActivity extends Activity {
     private static final int FILE_PICKER = 410;
     private static final String RELEASE_API = "https://api.github.com/repos/Alpasto-25/conversation-notes/releases/latest";
     private static final String RELEASE_PAGE = "https://github.com/Alpasto-25/conversation-notes/releases/latest";
+    private static final String QUARK_PAGE = "https://pan.quark.cn/s/7894e2647abc?pwd=LQxA";
     private JSONObject cachedRelease;
     private ApiException releaseFailure;
     private long releaseExpires;
@@ -407,10 +408,10 @@ public final class MainActivity extends Activity {
         return name + "：" + reason;
     }
     // Independent of model configuration, keys, chat and model request budgets.
-    private JSONObject checkUpdates(String id) throws Exception {
+    private JSONObject checkUpdates(String id, boolean fresh) throws Exception {
       synchronized (releaseLock) {
         if (cancelled.contains(id) || destroyed) throw new ApiException(499, "更新检查已取消。");
-        if (android.os.SystemClock.elapsedRealtime() < releaseExpires) {
+        if (!fresh && android.os.SystemClock.elapsedRealtime() < releaseExpires) {
             if (releaseFailure != null) throw releaseFailure;
             return cachedRelease;
         }
@@ -431,7 +432,7 @@ public final class MainActivity extends Activity {
             return cachedRelease;
         } catch (Exception ignored) {
             if (cancelled.contains(id) || destroyed) throw new ApiException(499, "更新检查已取消。");
-            releaseFailure = new ApiException(502, "更新检查暂不可用，请检查网络、稍后重试，或直接查看 Release 页。");
+            releaseFailure = new ApiException(502, "更新检查暂不可用，请检查网络后重试，也可直接前往夸克网盘下载。");
             releaseExpires = android.os.SystemClock.elapsedRealtime() + 60000;
             throw releaseFailure;
         } finally { connections.remove(id); connection.disconnect(); }
@@ -466,14 +467,15 @@ public final class MainActivity extends Activity {
                         });
                         return;
                     }
-                    if (method.equals("openRelease")) {
+                    if (method.equals("openRelease") || method.equals("openQuark")) {
+                        final String downloadPage = method.equals("openQuark") ? QUARK_PAGE : RELEASE_PAGE;
                         runOnUiThread(() -> {
                             if (destroyed) return;
                             try {
-                                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(RELEASE_PAGE)).addCategory(Intent.CATEGORY_BROWSABLE));
+                                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(downloadPage)).addCategory(Intent.CATEGORY_BROWSABLE));
                                 deliver(id, true, new JSONObject().put("opened", true));
                             } catch (Exception ignored) {
-                                try { deliver(id, false, new JSONObject().put("status", 502).put("error", "无法打开浏览器，请复制 Release 链接自行访问。")); } catch (Exception ignoredAgain) {}
+                                try { deliver(id, false, new JSONObject().put("status", 502).put("error", "无法打开浏览器，请复制下载链接自行访问。")); } catch (Exception ignoredAgain) {}
                             }
                         });
                         return;
@@ -503,7 +505,7 @@ public final class MainActivity extends Activity {
                     if (method.equals("status")) result = status();
                     else if (method.equals("configure")) result = configure(input);
                     else if (method.equals("evaluate")) result = evaluate(id, input);
-                    else if (method.equals("checkUpdates")) result = checkUpdates(id);
+                    else if (method.equals("checkUpdates")) result = checkUpdates(id, input.opt("fresh") instanceof Boolean && input.optBoolean("fresh"));
                     else throw new ApiException(400, "不支持的操作。");
                     if (!cancelled.contains(id)) deliver(id, true, result);
                 } catch (Exception error) {

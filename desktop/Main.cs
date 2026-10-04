@@ -188,6 +188,7 @@ namespace ConversationNotes
     {
         internal const string Endpoint = "https://api.github.com/repos/Alpasto-25/conversation-notes/releases/latest";
         internal const string Page = "https://github.com/Alpasto-25/conversation-notes/releases/latest";
+        internal const string QuarkPage = "https://pan.quark.cn/s/7894e2647abc?pwd=LQxA";
         private readonly HttpClient client;
         private readonly SemaphoreSlim gate = new SemaphoreSlim(1, 1);
         private DateTime expires = DateTime.MinValue;
@@ -198,13 +199,13 @@ namespace ConversationNotes
             client = testingClient ?? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false });
             client.Timeout = TimeSpan.FromSeconds(10);
         }
-        internal async Task<object> Check(CancellationToken token)
+        internal async Task<object> Check(CancellationToken token, bool fresh = false)
         {
             await gate.WaitAsync(token);
             try
             {
                 token.ThrowIfCancellationRequested();
-                if (DateTime.UtcNow < expires) { if (failure != null) throw failure; return cached; }
+                if (!fresh && DateTime.UtcNow < expires) { if (failure != null) throw failure; return cached; }
                 try
                 {
                     using (CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(token))
@@ -237,11 +238,11 @@ namespace ConversationNotes
                 catch (OperationCanceledException)
                 {
                     if (token.IsCancellationRequested) throw;
-                    throw new ApiException(504, "更新检查超时，请稍后重试或直接查看 Release 页。");
+                    throw new ApiException(504, "更新检查超时，请稍后重试，也可直接前往夸克网盘下载。");
                 }
                 catch
                 {
-                    failure = new ApiException(502, "更新检查暂不可用，请检查网络、稍后重试，或直接查看 Release 页。");
+                    failure = new ApiException(502, "更新检查暂不可用，请检查网络后重试，也可直接前往夸克网盘下载。");
                     expires = DateTime.UtcNow.AddSeconds(60);
                     throw failure;
                 }
@@ -252,6 +253,12 @@ namespace ConversationNotes
         {
             if (opener != null) opener(Page);
             else System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Page) { UseShellExecute = true });
+            return new { opened = true };
+        }
+        internal static object OpenQuark(Action<string> opener = null)
+        {
+            if (opener != null) opener(QuarkPage);
+            else System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(QuarkPage) { UseShellExecute = true });
             return new { opened = true };
         }
         public void Dispose() { client.Dispose(); }
@@ -598,8 +605,9 @@ namespace ConversationNotes
                         result = picker.ShowDialog(this) == DialogResult.OK ? config.Import(picker.FileName) : null;
                 }
                 else if (method == "evaluate") result = await model.Evaluate(payload, cancellation.Token);
-                else if (method == "checkUpdates") result = await releases.Check(cancellation.Token);
+                else if (method == "checkUpdates") { object fresh; result = await releases.Check(cancellation.Token, payload.TryGetValue("fresh", out fresh) && fresh is bool && (bool)fresh); }
                 else if (method == "openRelease") result = ReleaseClient.Open();
+                else if (method == "openQuark") result = ReleaseClient.OpenQuark();
                 else if (method == "openExternal") result = OfficialLinks.Open(Json.Text(payload, "url"));
                 else throw new ApiException(400, "不支持的操作。");
                 Reply(id, true, result);

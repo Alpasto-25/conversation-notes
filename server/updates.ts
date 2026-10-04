@@ -4,9 +4,11 @@ import { RELEASE_API, UPDATE_LIMIT } from "../shared/updates";
 export function createReleaseChecker(fetcher: typeof fetch = fetch, now = Date.now) {
   let pending: Promise<unknown> | undefined;
   let expires = 0;
-  return () => {
-    if (pending && now() < expires) return pending;
+  let running = false;
+  return (fresh = false) => {
+    if (pending && (running || (!fresh && now() < expires))) return pending;
     expires = now() + 60_000;
+    running = true;
     pending = (async () => {
       try {
         const response = await fetcher(RELEASE_API, {
@@ -33,8 +35,8 @@ export function createReleaseChecker(fetcher: typeof fetch = fetch, now = Date.n
         return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
       } catch {
         // Never forward upstream bodies or exception details.
-        throw new Error("更新检查暂不可用，请检查网络、稍后重试，或直接查看 Release 页。");
-      }
+        throw new Error("更新检查暂不可用，请检查网络后重试，也可直接前往夸克网盘下载。");
+      } finally { running = false; }
     })();
     return pending;
   };
