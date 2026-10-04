@@ -25,12 +25,14 @@ export function FolderGroup({ label, icon, count, open, toggle, children, classN
     const node = content.current; if (!node) return;
     const nodes = Array.from(node.children).slice(0, 6);
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const styles = getComputedStyle(document.documentElement);
+    const normal = parseFloat(styles.getPropertyValue("--motion-normal")), fast = parseFloat(styles.getPropertyValue("--motion-fast"));
     gsap.killTweensOf([node, ...nodes]);
     // Height is needed for document flow; child movement uses compositor transforms only.
     gsap.to(node, { height: expanded ? "auto" : 0, autoAlpha: expanded ? 1 : 0,
-      duration: reduce ? 0 : expanded ? 0.22 : 0.16, ease: "power2.out", overwrite: true });
+      duration: reduce ? 0 : expanded ? normal : fast, ease: "power2.out", overwrite: true });
     if (expanded) gsap.fromTo(nodes, { autoAlpha: reduce ? 1 : 0, y: reduce ? 0 : -4 },
-      { autoAlpha: 1, y: 0, duration: reduce ? 0 : 0.18, stagger: reduce ? 0 : { amount: Math.min(0.1, nodes.length * 0.025) },
+      { autoAlpha: 1, y: 0, duration: reduce ? 0 : fast, stagger: reduce ? 0 : { amount: Math.min(0.06, nodes.length * 0.015) },
         ease: "power2.out", overwrite: true, clearProps: "transform,opacity,visibility" });
   });
   useEffect(() => {
@@ -39,7 +41,7 @@ export function FolderGroup({ label, icon, count, open, toggle, children, classN
   }, [open, animate]);
   return <div ref={root} className={`folder-group ${className}`}>
     <button className="folder-toggle" aria-label={`展开或收起：${label}`} aria-expanded={open} aria-controls={id} onClick={toggle}>
-      <ChevronRight className={`folder-chevron ${open ? "expanded" : ""}`} size={16} strokeWidth={1.75} aria-hidden="true" />
+      <ChevronRight className={`folder-chevron ${open ? "expanded" : ""}`} size={16} strokeWidth={1.8} aria-hidden="true" />
       {icon}<span>{label}</span>{count !== undefined && <small>{count}</small>}
     </button>
     <div ref={content} id={id} className="folder-group-content" role="group" aria-label={label} aria-hidden={!open} inert={!open}>{children}</div>

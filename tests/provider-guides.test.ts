@@ -33,14 +33,14 @@ test("引导存储不可用时仍可显示、关闭，不影响使用", () => {
 });
 
 test("平台教程只接受已支持的平台，未知或继承属性安全回退", () => {
-  for (const provider of ["typesafe", "vercel", "openrouter"] as const)
+  for (const provider of ["typesafe", "vercel", "openrouter", "deepseek"] as const)
     assert.equal(guideProvider(provider), provider);
   for (const provider of [undefined, "", "other", "__proto__", "constructor", "toString"])
     assert.equal(guideProvider(provider), "typesafe");
 });
 
-test("三平台均提供用户自行申请 Key 的教程和官方入口", () => {
-  assert.deepEqual(Object.keys(PROVIDER_GUIDES), ["typesafe", "vercel", "openrouter"]);
+test("四个平台均提供用户自行申请 Key 的教程和官方入口", () => {
+  assert.deepEqual(Object.keys(PROVIDER_GUIDES).sort(), ["deepseek", "openrouter", "typesafe", "vercel"]);
   for (const guide of Object.values(PROVIDER_GUIDES)) {
     assert.equal(guide.keySteps.length, 3);
     assert.match(guide.keySteps.join(" "), /登录/);
@@ -52,10 +52,10 @@ test("三平台均提供用户自行申请 Key 的教程和官方入口", () => 
   }
 });
 
-test("官方白名单为九个唯一的 HTTPS 链接，没有私人数据或附加参数", () => {
-  assert.equal(OFFICIAL_PROVIDER_URLS.length, 9);
-  assert.equal(new Set(OFFICIAL_PROVIDER_URLS).size, 9);
-  const hosts = ["console.typesafe.ai", "docs.typesafe.ai", "vercel.com", "openrouter.ai"];
+test("四个平台的官方白名单有十二个唯一的 HTTPS 链接，没有私人数据或附加参数", () => {
+  assert.equal(OFFICIAL_PROVIDER_URLS.length, 12);
+  assert.equal(new Set(OFFICIAL_PROVIDER_URLS).size, 12);
+  const hosts = ["console.typesafe.ai", "docs.typesafe.ai", "vercel.com", "openrouter.ai", "platform.deepseek.com", "api-docs.deepseek.com"];
   for (const value of OFFICIAL_PROVIDER_URLS) {
     const url = new URL(value);
     assert.equal(url.protocol, "https:");

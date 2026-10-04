@@ -8,10 +8,17 @@ $SdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path
 $JavaRoot = if ($env:JAVA_HOME) { $env:JAVA_HOME } else { 'C:\Program Files\Android\Android Studio\jbr' }
 $BuildTools = Join-Path $SdkRoot 'build-tools\36.0.0'
 $AndroidJar = Join-Path $SdkRoot 'platforms\android-36\android.jar'
-$BuildRoot = Join-Path $TaskRoot ('work\android-build\build-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$BuildStamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
+$ArchiveRoot = [IO.Path]::GetFullPath((Join-Path $TaskRoot ('work\android-build\build-' + $BuildStamp)))
+# Windows aapt2/zipalign cannot reliably open Chinese paths. Keep their
+# intermediate inputs in TEMP, then retain the finished build in the project.
+$BuildRoot = if ($TaskRoot -match '[^\x00-\x7F]') {
+    [IO.Path]::GetFullPath((Join-Path $env:TEMP ('conversation-notes-android-' + $BuildStamp)))
+} else { $ArchiveRoot }
+if ($BuildRoot -match '[^\x00-\x7F]') { throw 'Android build tools require an ASCII TEMP path.' }
 $SigningRoot = Join-Path $TaskRoot 'work\android-signing'
 $SigningKey = Join-Path $SigningRoot 'notebook-local.jks'
-$ApkPath = Join-Path $TaskRoot 'outputs\conversation-notes-1.1.1.apk'
+$ApkPath = Join-Path $TaskRoot 'outputs\conversation-notes-1.1.2.apk'
 $Adb = Join-Path $SdkRoot 'platform-tools\adb.exe'
 foreach ($RequiredPath in @($AndroidJar, (Join-Path $JavaRoot 'bin\javac.exe'), (Join-Path $BuildTools 'aapt2.exe'))) {
     if (-not (Test-Path -LiteralPath $RequiredPath)) { throw "Missing Android build dependency: $RequiredPath" }
@@ -31,9 +38,11 @@ try {
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'LICENSE') -Destination (Join-Path $BuildRoot 'assets\LICENSE.txt')
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'ACKNOWLEDGEMENTS.md') -Destination (Join-Path $BuildRoot 'assets\ACKNOWLEDGEMENTS.md')
     Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'dist-mobile') | Copy-Item -Destination (Join-Path $BuildRoot 'assets\www') -Recurse -Force
-    & (Join-Path $BuildTools 'aapt2.exe') compile --dir (Join-Path $PSScriptRoot 'res') -o (Join-Path $BuildRoot 'compiled.zip')
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'res') -Destination (Join-Path $BuildRoot 'res') -Recurse
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'AndroidManifest.xml') -Destination (Join-Path $BuildRoot 'AndroidManifest.xml')
+    & (Join-Path $BuildTools 'aapt2.exe') compile --dir (Join-Path $BuildRoot 'res') -o (Join-Path $BuildRoot 'compiled.zip')
     Assert-ToolSuccess 'Android resources'
-    & (Join-Path $BuildTools 'aapt2.exe') link -o (Join-Path $BuildRoot 'base.apk') --manifest (Join-Path $PSScriptRoot 'AndroidManifest.xml') --java (Join-Path $BuildRoot 'generated') -I $AndroidJar --auto-add-overlay (Join-Path $BuildRoot 'compiled.zip')
+    & (Join-Path $BuildTools 'aapt2.exe') link -o (Join-Path $BuildRoot 'base.apk') --manifest (Join-Path $BuildRoot 'AndroidManifest.xml') --java (Join-Path $BuildRoot 'generated') -I $AndroidJar --auto-add-overlay (Join-Path $BuildRoot 'compiled.zip')
     Assert-ToolSuccess 'Android resource package'
     $JavaSources = @((Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Recurse -Filter '*.java').FullName) + @((Get-ChildItem -LiteralPath (Join-Path $BuildRoot 'generated') -Recurse -Filter '*.java').FullName)
     & (Join-Path $JavaRoot 'bin\javac.exe') --release 11 -encoding UTF-8 -classpath $AndroidJar -d (Join-Path $BuildRoot 'classes') @JavaSources
@@ -59,6 +68,14 @@ try {
     Assert-ToolSuccess 'APK signature verification'
     & node --import tsx (Join-Path $ProjectRoot 'scripts\audit-android.mjs') $ApkPath
     Assert-ToolSuccess 'APK secret and asset audit'
+    if ($BuildRoot -ne $ArchiveRoot) {
+        $TempRoot = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')
+        if (!$BuildRoot.StartsWith($TempRoot + '\conversation-notes-android-', [StringComparison]::OrdinalIgnoreCase) -or
+            !$ArchiveRoot.StartsWith([IO.Path]::GetFullPath($TaskRoot) + '\work\android-build\', [StringComparison]::OrdinalIgnoreCase) -or
+            (Test-Path -LiteralPath $ArchiveRoot)) { throw 'Unexpected Android build archive paths.' }
+        New-Item -ItemType Directory -Path (Split-Path -Parent $ArchiveRoot) -Force | Out-Null
+        Move-Item -LiteralPath $BuildRoot -Destination $ArchiveRoot
+    }
     Write-Output "APK ready: $ApkPath"
     if ($Install) {
         & $Adb -d install -r $ApkPath

@@ -10,13 +10,15 @@
 
 从 [最新 Release](https://github.com/Alpasto-25/conversation-notes/releases/latest) 下载：
 
-- Windows 安装版：`ConversationNotes-Setup-1.1.1-x64.exe`。
-- Windows 便携版：解压 `ConversationNotes-Portable-1.1.1-x64.zip`，运行 `ConversationNotes.exe`。
-- Android：`conversation-notes-1.1.1.apk`，支持 Android 8.0+。
+- Windows 安装版：`ConversationNotes-Setup-1.1.2-x64.exe`。
+- Windows 便携版：解压 `ConversationNotes-Portable-1.1.2-x64.zip`，运行 `ConversationNotes.exe`。
+- Android：`conversation-notes-1.1.2.apk`，支持 Android 8.0+。
 
 Windows 需要 Windows 10 1809 / Windows 11 和 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)，无需 Node.js。安装包未商业代码签名，Android 使用本地自用签名；请核对 Release 中的 SHA256，勿关闭系统安全防护。更新直接覆盖安装，手机不要先卸载。
 
 ## 使用
+
+在“外观模式”中选择跟随系统、浅色或暗色，选择会保留。默认开启启动更新检查，发现有效新版本时弹窗提醒；可稍后处理，也可关闭当前构建的提醒，更新入口红点仍保留。应用不自动下载或安装，更新检查不调用模型。
 
 1. 首次打开按引导选择 API 平台，填写该平台的 Key；设置中提供获取教程和官方计费入口。
 2. 选择分析场景，粘贴对话或导入文本文件，确认哪个昵称是自己。
@@ -25,6 +27,8 @@ Windows 需要 Windows 10 1809 / Windows 11 和 [WebView2 Runtime](https://devel
 “对话文件夹”按场景和聊天对象分类。新建保留旧记录，切换直接恢复原文及已保存分析，不再次消耗模型额度；导入也可先只保存、不分析。
 
 文件夹可整理名称、对象与场景、排序并记住展开状态。整份手记删除后进入回收站，可恢复；单条消息删除需确认，会清除该手记依赖旧上下文的分析，不自动重算。电脑最大化时界面随窗口扩展。
+
+1.1.2压缩了情绪 / 意图标签和“我的表达 / 下一步”功能条的留白，文字样式保持不变。点击功能条右上方的全屏按钮可展开聊天记录及已有分析，情绪、意图、回复评价和底部功能条保留，仍可点击查看完整解读；再次点击恢复正常布局，并回到进入全屏前的阅读位置。全屏不重载聊天、不丢失草稿、不自动调用模型，支持手机返回键和 Esc 退出。
 
 支持微信、QQ 和常见 WhatsApp 文字格式；其他来源可整理为：
 
@@ -39,7 +43,13 @@ Windows 需要 Windows 10 1809 / Windows 11 和 [WebView2 Runtime](https://devel
 
 ## API 与费用
 
-支持 [TypeSafe](https://console.typesafe.ai/keys)、[Vercel AI Gateway](https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys) 和 [OpenRouter](https://openrouter.ai/settings/keys)，任选一个，Key 必须来自对应平台。
+支持 [TypeSafe](https://console.typesafe.ai/keys)、[Vercel AI Gateway](https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys)、[OpenRouter](https://openrouter.ai/settings/keys) 和 [DeepSeek 官方 API](https://platform.deepseek.com/api_keys)，Key 必须来自对应平台。
+
+1.1.2新增 DeepSeek Flash / Pro 和聊天页“模型”选择器。各平台的 Key 在电脑/手机各自加密保存一次，之后切换模型或切回已配置平台无需重复填写；旧版 Jev 配置继续可用。切换本身不调用模型，不清除已有分析；新模型用于后续主动分析。不同模型的速度、结果及费用不同，实际响应还受网络和供应商负载影响。
+
+DeepSeek Flash / Pro 使用 JSON 模式，每题列出完整候选键，避免事件与意图选项混用。模型返回带候选键的相对权重，由应用统一归一化为概率与评分，避免长记录分析依赖模型手算概率合计或数数组位置。缺失问题、带非零权重的未知候选、全零或非法权重仍会拒绝。可定位到单题的问题只以 JSON 模式补全一次，保留同批已通过答案，实际用量累计计入；补全仍不合法则报错并保留已完成进度。零权重占位不影响评分，旧版返回格式继续兼容。手机空状态卡片取消内部滚动与聊天按钮预留空间；短屏滚动整页，导入后继续使用原有聊天滚动区。
+
+原网页版可在 `.env` 设置 `JEV_PROVIDER=deepseek` 和 `DEEPSEEK_API_KEY`；`JEV_MODEL` 可选 `deepseek-flash` 或 `deepseek-v4-pro`。保留原有配置变量，接口地址固定，无需填写 Base URL。
 
 **软件免费，不提供充值、代充、收款或 Key 销售。API Key 由用户自行向供应商获取，模型调用和额度费用由用户自费承担。** 分析、示例和连接测试可能消耗额度；赠额、价格和模型权限以供应商为准。
 

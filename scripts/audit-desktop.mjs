@@ -7,7 +7,7 @@ import { OFFICIAL_PROVIDER_URLS } from "../shared/provider-guides.ts";
 const root = resolve(import.meta.dirname, "..");
 const folder = resolve(process.argv[2]);
 const env = parse(await readFile(join(root, ".env"), "utf8").catch(() => ""));
-const secrets = ["JEV_API_KEY", "TYPESAFE_API_KEY", "AI_GATEWAY_API_KEY", "OPENROUTER_API_KEY"]
+const secrets = ["JEV_API_KEY", "TYPESAFE_API_KEY", "AI_GATEWAY_API_KEY", "OPENROUTER_API_KEY", "DEEPSEEK_API_KEY"]
   .flatMap((name) => [env[name], process.env[name]])
   .filter((value) => value && value.length > 8);
 let count = 0;

@@ -9,6 +9,7 @@ const allowedRoots = new Set([
   'README.md', 'README.en.md', 'ACKNOWLEDGEMENTS.md', 'CHANGELOG.md', 'SECURITY.md',
   'LICENSE', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts',
   'index.html', '.gitignore', '.env.example',
+  'UI_STYLE.md',
 ]);
 const credentialPatterns = [
   /apikey_[a-f0-9]{32}_[a-f0-9]{64}/i,
@@ -21,7 +22,7 @@ const credentialPatterns = [
 export async function auditPublication(folder) {
   const directory = resolve(folder);
   const env = parse(await readFile(join(projectRoot, '.env'), 'utf8').catch(() => ''));
-  const secrets = ['JEV_API_KEY', 'TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY', 'GH_TOKEN', 'GITHUB_TOKEN']
+  const secrets = ['JEV_API_KEY', 'TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY', 'GH_TOKEN', 'GITHUB_TOKEN']
     .flatMap(name => [env[name], process.env[name]]).filter(value => value && value.length > 8);
   let count = 0;
   async function scan(current, topLevel = false) {

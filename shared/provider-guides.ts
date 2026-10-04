@@ -1,4 +1,15 @@
 export const PROVIDER_GUIDES = {
+  deepseek: {
+    name: 'DeepSeek', keyUrl: 'https://platform.deepseek.com/api_keys',
+    billingUrl: 'https://platform.deepseek.com/usage', docsUrl: 'https://api-docs.deepseek.com/zh-cn/',
+    keySteps: [
+      '登录 DeepSeek 官方开放平台；聊天应用账号或订阅不等于 API 额度。',
+      '进入 API keys 页面创建并妥善保存 Key，不要发送到聊天、截图或公开仓库。',
+      '回到本软件选择 DeepSeek，粘贴 Key 并保存一次；Flash 和 Pro 之后可以直接切换，无需重新填写 Key。',
+    ],
+    billingSteps: '在官方开放平台查看用量、余额及充值入口。Flash 与 Pro 的价格和响应速度可能不同，以官方当前信息为准；本软件不收取模型费用。',
+    billingLabel: '官方用量 / 余额入口',
+  },
   typesafe: {
     name: "TypeSafe",
     keyUrl: "https://console.typesafe.ai/keys",

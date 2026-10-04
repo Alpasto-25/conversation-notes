@@ -1,12 +1,18 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useNotebooks } from "./useNotebooks";
 import { ConversationFolders } from "./ConversationFolders";
+import { MobileDrawer, type MobileDrawerHandle } from "./MobileDrawer";
+import { ModelSelector, type ModelSelection } from './ModelSelector';
+import { useChatReading } from './useChatReading';
+import { TooltipLayer } from "./TooltipLayer";
+import { lockOverlayBackground } from "./overlay-lock";
 import { emptyConversation, type NotebookSummary } from "./notebooks";
 import { INTENTS, topIntents } from "../shared/intents";
 import { REPLY_RATINGS, replyRating } from "../shared/ratings";
 import { EMOTIONS, topEmotions } from "../shared/labels";
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useCallback,
@@ -34,6 +40,9 @@ import {
   FolderOpen,
   Pencil,
   Trash2,
+  Menu,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { parseChat, toMessages, mergeMessages } from "../shared/parser";
 import {
@@ -57,6 +66,9 @@ import { FirstRunGuide } from "./FirstRunGuide";
 import { markOnboardingSeen, shouldShowOnboarding } from "../shared/provider-guides";
 import { useUpdates } from "./useUpdates";
 import { UpdatesPage } from "./UpdatesPage";
+import { useAppearance } from "./useAppearance";
+import { AppearanceSettings } from "./AppearanceSettings";
+import { APP_BUILD } from "./platform";
 
 function Modal({
   title,
@@ -68,15 +80,30 @@ function Modal({
   close: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  const closeRef = useRef(close), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [closing, setClosing] = useState(false);
+  closeRef.current = close;
+  const dismiss = useCallback(() => {
+    if (timer.current) return;
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) { closeRef.current(); return; }
+    setClosing(true);
+    const duration = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--motion-panel"));
+    timer.current = setTimeout(() => closeRef.current(), duration * 1000);
+  }, []);
+  useLayoutEffect(() => {
     const old = document.activeElement as HTMLElement;
     ref.current?.focus();
+    const unlock = lockOverlayBackground(document.querySelector<HTMLElement>(".workspace"));
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") {
+        // The first Escape belongs to an open native select picker.
+        if (CSS.supports("selector(select:open)") && ref.current?.querySelector("select:open")) return;
+        dismiss();
+      }
       if (e.key === "Tab") {
         const nodes = Array.from(
           ref.current?.querySelectorAll<HTMLElement>(
-            "button:not(:disabled),select,textarea,input,a[href],summary",
+            "button:not(:disabled),select:not(:disabled),textarea:not(:disabled),input:not(:disabled),a[href],summary",
           ) || [],
         ).filter((node) => !node.closest("[inert]") && node.getClientRects().length > 0);
         if (e.shiftKey && document.activeElement === nodes[0]) {
@@ -90,14 +117,17 @@ function Modal({
     };
     document.addEventListener("keydown", onKey);
     return () => {
+      clearTimeout(timer.current);
       document.removeEventListener("keydown", onKey);
-      old?.focus();
+      unlock();
+      if (old?.isConnected && old.getClientRects().length && !old.closest("[inert]")) old.focus();
+      else document.querySelector<HTMLButtonElement>(".mobile-menu-toggle")?.focus();
     };
   }, []);
   return (
     <div
-      className="overlay"
-      onMouseDown={(e) => e.target === e.currentTarget && close()}
+      className={`overlay${closing ? " is-closing" : ""}`}
+      onMouseDown={(e) => e.target === e.currentTarget && dismiss()}
     >
       <div
         ref={ref}
@@ -106,10 +136,11 @@ function Modal({
         aria-modal="true"
         aria-label={title}
         className="modal"
+        inert={closing}
       >
         <header>
           <h2>{title}</h2>
-          <button className="icon" aria-label="关闭" onClick={close}>
+          <button className="icon" aria-label="关闭" onClick={dismiss}>
             <X size={20} />
           </button>
         </header>
@@ -124,7 +155,13 @@ export default function App() {
   const { messages, setMessages, input, setInput, self, setSelf, other, setOther, relation,
     ready, storageError, switching, changeRelation } = notebooks;
   const updates = useUpdates();
+  const appearance = useAppearance();
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
+  const drawer = useRef<MobileDrawerHandle>(null);
+  const closeMenu = useCallback(() => drawer.current?.close(), []);
+  const workspace = useRef<HTMLDivElement>(null), menuButton = useRef<HTMLButtonElement>(null);
   const [libraryOpen, setLibraryOpen] = useState(false), [editingNotebook, setEditingNotebook] = useState(false);
   const [editTitle, setEditTitle] = useState(""), [editContact, setEditContact] = useState("");
   const [editScene, setEditScene] = useState<Relation>("general"), [trashOpen, setTrashOpen] = useState(false);
@@ -141,6 +178,8 @@ export default function App() {
     [notice, setNotice] = useState("");
   const [overlap, setOverlap] = useState<Message[] | null>(null);
   const [apiInfo, setApiInfo] = useState<ApiStatus | null>(null);
+  const [settingsSelection, setSettingsSelection] = useState<ModelSelection>();
+  useEffect(() => { if (!settings) setSettingsSelection(undefined); }, [settings]);
   const [onboarding, setOnboarding] = useState(() => {
     try { return shouldShowOnboarding(window.localStorage); }
     catch { return true; }
@@ -149,6 +188,9 @@ export default function App() {
     try { markOnboardingSeen(window.localStorage); } catch { /* Keep the guide dismissible. */ }
     setOnboarding(false);
   };
+  const updatePrompt = updates.showReminder && ready && a.status !== "loading" && !switching &&
+    !menuOpen && !onboarding && !appearanceOpen && !updatesOpen && !settings && !importing && !detail &&
+    !libraryOpen && !editingNotebook && !trashOpen && !notebookDelete && !messageDelete && !overlap;
   useEffect(() => {
     let live = true;
     const refresh = () => {
@@ -167,8 +209,28 @@ export default function App() {
       window.removeEventListener("notebook-config-changed", refresh);
     };
   }, []);
+  const scroller = useRef<HTMLDivElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const virtual = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scroller.current,
+    estimateSize: () => 150,
+    getItemKey: useCallback((i: number) => messages[i].id, [messages]),
+    overscan: 8,
+    anchorTo: "end",
+    followOnAppend: true,
+    scrollEndThreshold: 100,
+  });
+  const reading = useChatReading(scroller, virtual, notebooks.active?.id);
+  const stay = useRef(true);
+  useEffect(() => {
+    if (messages.length && stay.current)
+      virtual.scrollToIndex(messages.length - 1, { align: "end" });
+  }, [messages.length]);
   useEffect(() => {
     window.__notebookBack = () => {
+      if (updatePrompt) { updates.snooze(); return true; }
+      if (appearanceOpen) { setAppearanceOpen(false); return true; }
       if (messageDelete) { setMessageDelete(null); return true; }
       if (notebookDelete) { setNotebookDelete(null); return true; }
       if (trashOpen) { setTrashOpen(false); return true; }
@@ -195,29 +257,14 @@ export default function App() {
         setDetail(null);
         return true;
       }
+      if (drawer.current?.isOpen()) { closeMenu(); return true; }
+      if (reading.expanded) { reading.close(); return true; }
       return false;
     };
     return () => {
       delete window.__notebookBack;
     };
-  }, [overlap, importing, settings, detail, onboarding, updatesOpen, libraryOpen, editingNotebook, trashOpen, notebookDelete, messageDelete]);
-  const scroller = useRef<HTMLDivElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const virtual = useVirtualizer({
-    count: messages.length,
-    getScrollElement: () => scroller.current,
-    estimateSize: () => 150,
-    getItemKey: useCallback((i: number) => messages[i].id, [messages]),
-    overscan: 8,
-    anchorTo: "end",
-    followOnAppend: true,
-    scrollEndThreshold: 100,
-  });
-  const stay = useRef(true);
-  useEffect(() => {
-    if (messages.length && stay.current)
-      virtual.scrollToIndex(messages.length - 1, { align: "end" });
-  }, [messages.length]);
+  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, updatePrompt, updates.snooze, libraryOpen, editingNotebook, trashOpen, notebookDelete, messageDelete, closeMenu, reading.expanded, reading.close]);
   const busy = a.status === "loading" || switching,
     ov = a.overview,
     value = ov?.affinity.value,
@@ -357,12 +404,13 @@ export default function App() {
   const folderActions = { edit: (id: string) => void editNotebook(id), recycle: (note: NotebookSummary) => requestNotebookDelete(note),
     trashCount: notebooks.trashItems.length, openTrash, manageDisabled };
   const importInvalid = busy || !!storageError || !role || !parsed.length || names.length > 2 || names.includes("未分配") || (!names.includes(role) && role !== "__self_absent__");
+  function menuAction(action: () => void) { closeMenu(); action(); }
   const chosen = messages.find((m) => m.id === detail),
     result = detail ? a.lines[detail] : undefined;
   return (
-    <main className={`app${isDesktop ? " desktop-app" : ""}`}>
-      <div className="workspace">
-        <section className="notebook" aria-label="对话分析">
+    <main className={`app${isDesktop ? " desktop-app" : ""}${reading.expanded ? " is-chat-reading" : ""}`}>
+      <div ref={workspace} className="workspace">
+        <section className={`notebook${messages.length ? '' : ' is-empty'}`} aria-label="对话分析">
           <nav className="chat-rail" aria-label="工作空间工具">
             <div className="brand">
               <span className="brand-mark">
@@ -403,6 +451,7 @@ export default function App() {
               <BookOpen size={18} /> 试试一段示例
             </button>
             <span className="rail-label rail-label-second">工具与帮助</span>
+            <button onClick={() => setAppearanceOpen(true)}><Settings2 size={18} /> 外观模式</button>
             <button className="update-entry" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} onClick={() => setUpdatesOpen(true)}>
               <span className="update-icon"><Download size={18} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
               版本与更新{updates.hasUpdate && <span className="nav-count">新</span>}
@@ -435,6 +484,10 @@ export default function App() {
             </div>
           </nav>
           <header className="chat-head">
+            <button ref={menuButton} className="icon mobile-menu-toggle" aria-label="打开菜单"
+              aria-expanded="false" aria-controls="mobile-workspace-menu" onClick={() => drawer.current?.toggle()}>
+              <Menu size={22} />
+            </button>
             <div className="breadcrumb">
               <NotebookPen size={17} />
               <span>{isMobile ? "手机工作空间" : "私人工作空间"}</span>
@@ -442,12 +495,12 @@ export default function App() {
               <strong>对话手记</strong>
             </div>
             <div className="header-tools">
-              <button className="icon" aria-label="对话文件夹" title="对话文件夹" disabled={libraryDisabled} onClick={() => setLibraryOpen(true)}><FolderOpen size={19} /></button>
-              <button className="icon update-entry" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} title={updates.hasUpdate ? "版本与更新：有新版本可下载" : "版本与更新"} onClick={() => setUpdatesOpen(true)}>
+              <button className="icon mobile-secondary" aria-label="对话文件夹" data-tooltip="对话文件夹" disabled={libraryDisabled} onClick={() => setLibraryOpen(true)}><FolderOpen size={19} /></button>
+              <button className="icon update-entry mobile-secondary" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} data-tooltip={updates.hasUpdate ? "版本与更新：有新版本可下载" : "版本与更新"} onClick={() => setUpdatesOpen(true)}>
                 <span className="update-icon"><Download size={18} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
               </button>
               <button
-                className={`api-badge ${apiInfo?.configured ? "configured" : ""}`}
+                className={`api-badge mobile-secondary ${apiInfo?.configured ? "configured" : ""}`}
                 onClick={() => setSettings(true)}
               >
                 <span />
@@ -460,14 +513,14 @@ export default function App() {
               <button
                 className="icon"
                 aria-label="新建对话手记"
-                title="新建手记，保留当前记录"
+                data-tooltip="新建手记，保留当前记录"
                 disabled={libraryDisabled}
                 onClick={() => void createNotebook()}
               >
                 <Plus size={20} />
               </button>
               <button
-                className="icon"
+                className="icon mobile-secondary"
                 aria-label="更多聊天设置"
                 onClick={() => setSettings(true)}
               >
@@ -503,7 +556,7 @@ export default function App() {
                     aria-label="分析场景"
                     value={relation}
                     disabled={!ready || switching || !!storageError}
-                    onChange={(e) => changeRelation(e.target.value as Relation)}
+                    onChange={(e) => { setNotice(""); void changeRelation(e.target.value as Relation); }}
                   >
                     {Object.entries(RELATIONS).map(([key, label]) => (
                       <option key={key} value={key}>
@@ -512,17 +565,14 @@ export default function App() {
                     ))}
                   </select>
                 </label>
+                {isNative && <ModelSelector status={apiInfo} disabled={busy || !ready} changed={setApiInfo}
+                  notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
                 <span className="save-badge">
                   <ShieldCheck size={13} />
                   {storageError ? "保存异常" : "仅在本机保存"}
                 </span>
                 <button className="text-button organize-notebook" disabled={manageDisabled} onClick={() => void editNotebook()}><Pencil size={13} /> 整理手记</button>
               </div>
-              {updates.showReminder && <div className="update-reminder" role="status">
-                <span>有新的{isMobile ? "手机版" : isDesktop ? "电脑版" : "应用"}可下载</span>
-                <button onClick={() => setUpdatesOpen(true)}>查看更新 <ArrowUpRight size={13} /></button>
-                <button className="icon" aria-label="暂不提醒此构建" onClick={updates.dismiss}><X size={15} /></button>
-              </div>}
             </div>
             <button
               className="header-affinity"
@@ -552,9 +602,14 @@ export default function App() {
               </span>
             </button>
           </div>
+          <div ref={reading.container} className="chat-reading">
           <div
             ref={scroller}
+            id="chat-records"
             className="chat-scroll"
+            tabIndex={reading.expanded ? 0 : undefined}
+            role="region"
+            aria-label={reading.expanded ? '聊天记录全屏阅读' : '聊天记录'}
             onScroll={(e) => {
               const el = e.currentTarget;
               stay.current =
@@ -660,7 +715,7 @@ export default function App() {
                                     <span className="analysis-row-label">
                                       情绪
                                     </span>
-                                    {r?.emotions ? (
+                                    <div className="analysis-chips">{r?.emotions ? (
                                       topEmotions(r.emotions).map((emotion) => (
                                         <button
                                           key={emotion.key}
@@ -682,13 +737,13 @@ export default function App() {
                                       >
                                         {busy ? "分析中" : "分析情绪"}
                                       </button>
-                                    )}
+                                    )}</div>
                                   </div>
                                   <div className="analysis-row intent-row">
                                     <span className="analysis-row-label">
                                       意图
                                     </span>
-                                    {r?.intents ? (
+                                    <div className="analysis-chips">{r?.intents ? (
                                       topIntents(r.intents).map((intent) => (
                                         <button
                                           key={intent.key}
@@ -710,7 +765,7 @@ export default function App() {
                                       >
                                         {busy ? "分析中" : "分析意图"}
                                       </button>
-                                    )}
+                                    )}</div>
                                   </div>
                                 </>
                               ) : r ? (
@@ -737,13 +792,20 @@ export default function App() {
                             </div>
                           )}
                         </div>
-                        <button className="icon message-delete danger" aria-label={`删除第 ${i + 1} 条消息`} title="删除这条聊天消息" disabled={manageDisabled} onClick={() => setMessageDelete(m)}><Trash2 size={15} strokeWidth={1.75} /></button>
+                        <button className="icon message-delete danger" aria-label={`删除第 ${i + 1} 条消息`} data-tooltip="删除这条聊天消息" disabled={manageDisabled} onClick={() => setMessageDelete(m)}><Trash2 size={15} strokeWidth={1.8} /></button>
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
+          </div>
+          {!!messages.length && <button ref={reading.control} style={reading.controlStyle} className="icon chat-reading-toggle" onClick={reading.toggle}
+            disabled={reading.transitioning || switching} aria-controls="chat-records" aria-pressed={reading.expanded}
+            aria-label={reading.expanded ? '退出聊天记录全屏' : '全屏显示聊天记录'}
+            data-tooltip={reading.expanded ? '恢复正常布局' : '全屏显示聊天记录'}>
+            {reading.expanded ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+          </button>}
           </div>
           <div className="chat-insights">
             <button
@@ -865,6 +927,29 @@ export default function App() {
           </div>
         </section>
       </div>
+      <TooltipLayer />
+      <MobileDrawer ref={drawer} background={workspace} trigger={menuButton} onOpenChange={setMenuOpen}>
+        <span className="rail-label">我的工作空间</span>
+        <button className="rail-active" aria-current="page" onClick={() => menuAction(() => {
+          stay.current = true;
+          if (messages.length) virtual.scrollToIndex(messages.length - 1, { align: "end" });
+        })}><MessageCircle size={19} /> 当前对话<span className="nav-count">{messages.length}</span></button>
+        <button disabled={libraryDisabled} onClick={() => menuAction(() => setLibraryOpen(true))}><FolderOpen size={19} /> 对话文件夹</button>
+        <button disabled={!ready || busy} onClick={() => menuAction(() => fileInput.current?.click())}><Upload size={19} /> 导入记录</button>
+        <button disabled={busy} onClick={() => menuAction(() => prepare(exampleForRelation(relation)))}><BookOpen size={19} /> 试试一段示例</button>
+        <span className="rail-label rail-label-second">工具与帮助</span>
+        <button onClick={() => menuAction(() => setAppearanceOpen(true))}><Settings2 size={19} /> 外观模式</button>
+        <button className="update-entry" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} onClick={() => menuAction(() => setUpdatesOpen(true))}>
+          <span className="update-icon"><Download size={19} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
+          版本与更新{updates.hasUpdate && <span className="nav-count">新版本</span>}
+        </button>
+        <button onClick={() => menuAction(() => setSettings(true))}><Settings2 size={19} /> 分析与 API 设置
+          <small className={`menu-api-status${apiInfo?.configured ? " configured" : ""}`}>{apiInfo?.configured ? "已配置" : "待配置"}</small>
+        </button>
+        <button onClick={() => menuAction(() => setDetail("overview"))}><Sparkles size={19} /> 查看分析解读</button>
+        <button onClick={() => menuAction(() => setDetail("formats"))}><FileText size={19} /> 支持的格式</button>
+        <button onClick={() => menuAction(() => setOnboarding(true))}><BookOpen size={19} /> 使用引导</button>
+      </MobileDrawer>
       {importing && (
         <Modal title="确认聊天里的你" close={() => setImporting(false)}>
           <label className="field">
@@ -886,6 +971,7 @@ export default function App() {
               .map((n) => (
                 <button
                   className={role === n ? "selected" : ""}
+                  aria-pressed={role === n}
                   key={n}
                   onClick={() => setRole(n)}
                 >
@@ -895,6 +981,7 @@ export default function App() {
             {names.length === 1 && (
               <button
                 className={role === "__self_absent__" ? "selected" : ""}
+                aria-pressed={role === "__self_absent__"}
                 onClick={() => setRole("__self_absent__")}
               >
                 这些都是对方的话
@@ -943,7 +1030,8 @@ export default function App() {
       )}
       {settings && (
         <Modal title="聊天设置" close={() => setSettings(false)}>
-          {isNative && <MobileSettings status={apiInfo} changed={setApiInfo} />}
+          <AppearanceSettings appearance={appearance} />
+          {isNative && <MobileSettings status={apiInfo} changed={setApiInfo} selection={settingsSelection} disabled={busy} />}
           {!isNative && (
             <>
             <p className="desktop-api-note">
@@ -958,7 +1046,8 @@ export default function App() {
             分析场景
             <select
               value={relation}
-              onChange={(e) => changeRelation(e.target.value as Relation)}
+              disabled={!ready || switching || !!storageError}
+              onChange={(e) => { setNotice(""); void changeRelation(e.target.value as Relation); }}
             >
               {Object.entries(RELATIONS).map(([k, v]) => (
                 <option value={k} key={k}>
@@ -1013,6 +1102,17 @@ export default function App() {
         </Modal>
       )}
       {updatesOpen && <Modal title="版本与更新" close={() => setUpdatesOpen(false)}><UpdatesPage updates={updates} /></Modal>}
+      {appearanceOpen && <Modal title="外观模式" close={() => setAppearanceOpen(false)}><AppearanceSettings appearance={appearance} /></Modal>}
+      {updatePrompt && <Modal title="发现新版本" close={updates.snooze}>
+        <p>对话手记 v{updates.result?.version} 已发布。</p>
+        <p>当前版本 v{APP_BUILD.version}。{updates.result?.message}</p>
+        <p>查看更新说明，下载对应系统的安装包即可更新。应用不会自动下载或安装，现有记录继续保存在本机。</p>
+        <div className="update-actions">
+          <button className="secondary" onClick={updates.snooze}>稍后再说</button>
+          <button className="primary" onClick={() => { updates.snooze(); setUpdatesOpen(true); }}><Download size={16} /> 查看更新</button>
+        </div>
+        <button className="text-button" onClick={updates.dismiss}>此版本不再提醒</button>
+      </Modal>}
       {notebookDelete && <Modal title={notebookDelete.permanent ? "彻底删除手记？" : "删除手记？"} close={() => setNotebookDelete(null)}>
         <p>「{notebookDelete.note.title}」共 {notebookDelete.note.count} 条聊天。
           {notebookDelete.permanent ? "将永久删除原文、分析和草稿，无法恢复。" : "将移入回收站，原文、分析和草稿仍可恢复。"}其他手记不会受影响。</p>
@@ -1031,7 +1131,7 @@ export default function App() {
         <div className="trash-list">{notebooks.trashItems.map((n) => <div className="trash-row" key={n.id}>
           <div><strong>{n.title}</strong><small>{RELATIONS[n.relation]} · {n.contact} · {n.count} 条</small></div>
           <button className="text-button" aria-label={`恢复手记：${n.title}`} disabled={manageDisabled} onClick={() => void notebooks.recover(n.id).then((restored) => { if (restored) setNotice("手记已恢复，原文和分析保留，没有调用模型。"); })}><RotateCcw size={15} />恢复</button>
-          <button className="icon danger" aria-label={`彻底删除手记：${n.title}`} title="彻底删除" disabled={manageDisabled} onClick={() => requestNotebookDelete(n, true)}><Trash2 size={15} /></button>
+          <button className="icon danger" aria-label={`彻底删除手记：${n.title}`} data-tooltip="彻底删除" disabled={manageDisabled} onClick={() => requestNotebookDelete(n, true)}><Trash2 size={15} /></button>
         </div>)}</div>
         <button className="secondary" onClick={() => { setTrashOpen(false); setLibraryOpen(true); }}>返回对话文件夹</button>
       </Modal>}
@@ -1091,7 +1191,7 @@ export default function App() {
               )}
               {!!ov?.memoryEvidenceIds?.length && (
                 <details>
-                  <summary>参考的历史原话</summary>
+                  <summary><ChevronRight size={16} aria-hidden="true" />参考的历史原话</summary>
                   {[...new Set(ov.memoryEvidenceIds)].map((id) => {
                     const m = messages.find((m) => m.id === id);
                     return m ? (

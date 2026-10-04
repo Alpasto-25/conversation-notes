@@ -49,7 +49,8 @@ export function useAnalysis() {
     base = useRef<{ messages: Message[]; relation: Relation } | null>(null),
     savedLines = useRef(lines),
     savedEvents = useRef(events),
-    processed = useRef(0);
+    processed = useRef(0),
+    completed = useRef(false);
   function cancel() {
     rev.current++;
     controller.current?.abort();
@@ -61,6 +62,7 @@ export function useAnalysis() {
     savedLines.current = {};
     savedEvents.current = {};
     processed.current = 0;
+    completed.current = false;
     setLines({});
     setEvents({});
     setTrend([]);
@@ -78,6 +80,7 @@ export function useAnalysis() {
     savedLines.current = s.lines;
     savedEvents.current = s.events;
     processed.current = s.analyzedCount;
+    completed.current = s.completed;
     setLines(s.lines);
     setEvents(s.events);
     setTrend(s.trend);
@@ -87,14 +90,6 @@ export function useAnalysis() {
     setStatus(s.completed ? "complete" : "idle");
   }
   async function run(messages: Message[], relation: Relation) {
-    const revision = ++rev.current;
-    controller.current?.abort();
-    const ctrl = new AbortController();
-    controller.current = ctrl;
-    const started = performance.now();
-    setStatus("loading");
-    setError("");
-    setOverviewFresh(false);
     const previous = base.current;
     const append =
       !!previous &&
@@ -105,8 +100,25 @@ export function useAnalysis() {
           m.id === messages[i].id &&
           m.sender === messages[i].sender &&
           m.text === messages[i].text &&
-          m.timestamp === messages[i].timestamp,
+          m.timestamp === messages[i].timestamp &&
+          m.kind === messages[i].kind,
       );
+    // A restored, complete result already covers this exact scene and text.
+    if (append && completed.current && messages.length === processed.current) {
+      setStatus("complete");
+      setOverviewFresh(true);
+      setError("");
+      return;
+    }
+    const revision = ++rev.current;
+    controller.current?.abort();
+    const ctrl = new AbortController();
+    controller.current = ctrl;
+    const started = performance.now();
+    completed.current = false;
+    setStatus("loading");
+    setError("");
+    setOverviewFresh(false);
     const changed = !append || messages.length !== processed.current;
     let nextLines: Record<string, LineResult> = append
       ? { ...savedLines.current }
@@ -268,6 +280,7 @@ export function useAnalysis() {
     setOverviewFresh(!!final?.overview && !failed);
     setStatus(failed ? "error" : "complete");
     if (final?.overview && !failed) {
+      completed.current = true;
       processed.current = messages.length;
       setAnalyzedCount(messages.length);
       setTrend((old) => {

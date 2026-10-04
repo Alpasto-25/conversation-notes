@@ -10,6 +10,7 @@ function store(key: string, value: string) { try { localStorage.setItem(key, val
 export function useUpdates() {
   const [automatic, setAutomatic] = useState(() => stored(PREF) !== "off");
   const [dismissed, setDismissed] = useState(() => stored(DISMISSED));
+  const [snoozed, setSnoozed] = useState<string>();
   const [result, setResult] = useState<UpdateResult | null>(null);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
@@ -52,7 +53,8 @@ export function useUpdates() {
   return {
     automatic, result, error, checking, checkedAt, check,
     hasUpdate: result?.status === "available",
-    showReminder: result?.status === "available" && result.reminderId !== dismissed,
+    showReminder: result?.status === "available" && result.reminderId !== dismissed && result.reminderId !== snoozed,
+    snooze() { setSnoozed(result?.reminderId); },
     setAutomatic(value: boolean) { store(PREF, value ? "on" : "off"); setAutomatic(value); },
     dismiss() {
       if (result?.reminderId) { store(DISMISSED, result.reminderId); setDismissed(result.reminderId); }

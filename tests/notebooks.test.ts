@@ -95,6 +95,37 @@ test("previous scene results restore unchanged without rebuilding or reanalysis"
   const uncached = conversationInScene(note, "family");
   assert.equal(uncached.relation, "family"); assert.deepEqual(uncached.messages, friend.messages); assert.deepEqual(uncached.lines, {});
 });
+
+test("general and friend analysis stay independent through repeated switches and restart", async () => {
+  const general = { ...fixture(), relation: "general" as const };
+  const factory = new IDBFactory(), store = createNotebookStore(factory);
+  let note = newNotebook(general);
+  await store.save(note, true);
+  note = organizeNotebook(note, note.title, note.contact, "friend");
+  const friend = { ...fixture(), overview: { ...fixture().overview!, affinity: { ...fixture().overview!.affinity, value: 50 } } };
+  note = { ...note, conversation: friend, scenes: { ...note.scenes, friend } };
+  for (let i = 0; i < 3; i++) {
+    note = organizeNotebook(note, note.title, note.contact, "general");
+    assert.deepEqual(note.conversation, general);
+    note = organizeNotebook(note, note.title, note.contact, "friend");
+    assert.deepEqual(note.conversation, friend);
+  }
+  await store.save(note); await store.close();
+  const reopened = createNotebookStore(factory), restored = (await reopened.loadLibrary()).active!;
+  assert.deepEqual(conversationInScene(restored, "general"), general);
+  assert.deepEqual(conversationInScene(restored, "friend"), friend);
+  await reopened.close();
+});
+
+test("a scene cache entry never restores results belonging to another relation", () => {
+  const note = newNotebook({ ...fixture(), relation: "general" });
+  note.scenes.general = fixture();
+  const restored = conversationInScene(note, "general");
+  assert.equal(restored.relation, "general");
+  assert.equal(restored.completed, false);
+  assert.equal(restored.overview, null);
+  assert.deepEqual(restored.lines, {});
+});
 test("old scene results are not applied to changed original messages, roles or rubrics", () => {
   for (const change of [
     { messages: [...fixture().messages, { id: "three", sender: "self" as const, text: "收到", timestamp: null, kind: "text" as const }] },

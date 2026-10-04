@@ -40,7 +40,7 @@ export function conversationInScene(n: Notebook, relation: Relation): SavedConve
   const current = n.conversation;
   const saved = n.scenes[relation];
   // Never apply old results to changed messages, identities, or a different rubric.
-  if (saved && saved.rubric === RUBRIC && saved.self === current.self && saved.other === current.other
+  if (saved && saved.relation === relation && saved.rubric === RUBRIC && saved.self === current.self && saved.other === current.other
     && saved.messages.length === current.messages.length && saved.messages.every((m, i) => {
       const next = current.messages[i];
       return m.id === next.id && m.sender === next.sender && m.text === next.text

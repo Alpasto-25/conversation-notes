@@ -7,8 +7,8 @@ import { OFFICIAL_PROVIDER_URLS } from '../shared/provider-guides.ts';
 
 const root = resolve(import.meta.dirname, '..');
 const config = parse(await readFile(join(root, '.env'), 'utf8').catch(() => ''));
-const secrets = ['JEV_API_KEY', 'TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY']
-  .map(name => config[name]).filter(value => value && value.length > 8);
+const secrets = ['JEV_API_KEY', 'TYPESAFE_API_KEY', 'AI_GATEWAY_API_KEY', 'OPENROUTER_API_KEY', 'DEEPSEEK_API_KEY']
+  .flatMap(name => [config[name], process.env[name]]).filter(value => value && value.length > 8);
 const outputRoot = basename(dirname(root)) === 'outputs' ? dirname(root) : join(root, 'outputs');
 const { version } = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 const apk = await readFile(process.argv[2] ? resolve(process.argv[2]) : join(outputRoot, `conversation-notes-${version}.apk`));

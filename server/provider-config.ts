@@ -1,3 +1,4 @@
+import { defaultModel, supportsModel } from '../shared/models';
 export const PROVIDERS = {
   typesafe: {
     name: "TypeSafe",
@@ -20,11 +21,16 @@ export const PROVIDERS = {
     keyEnv: "OPENROUTER_API_KEY",
     keyUrl: "https://openrouter.ai/settings/keys",
   },
+  deepseek: {
+    name: 'DeepSeek', endpoint: 'https://api.deepseek.com/chat/completions',
+    model: 'deepseek-flash', keyEnv: 'DEEPSEEK_API_KEY', keyUrl: 'https://platform.deepseek.com/api_keys',
+  },
 } as const;
 export type Provider = keyof typeof PROVIDERS;
-export type ProviderConfig = (typeof PROVIDERS)[Provider] & {
+export type ProviderConfig = Omit<(typeof PROVIDERS)[Provider], 'model'> & {
   provider: Provider;
   apiKey: string;
+  model: string;
 };
 
 export class ConfigurationError extends Error {
@@ -37,7 +43,7 @@ export function getProviderConfig(
   const selected = env.JEV_PROVIDER?.trim().toLowerCase() || "typesafe";
   if (!Object.hasOwn(PROVIDERS, selected))
     throw new ConfigurationError(
-      "平台只支持 typesafe、vercel、openrouter。请运行 npm run setup。 / Unsupported provider.",
+      "平台只支持 typesafe、vercel、openrouter、deepseek。请运行 npm run setup。 / Unsupported provider.",
     );
   const provider = selected as Provider;
   const preset = PROVIDERS[provider];
@@ -54,7 +60,9 @@ export function getProviderConfig(
     throw new ConfigurationError(
       "这看起来是 OpenRouter Key，请选择 openrouter。 / Select OpenRouter for this key.",
     );
-  return { ...preset, provider, apiKey };
+  const model = env.JEV_MODEL?.trim() || defaultModel(provider);
+  if (!supportsModel(provider, model)) throw new ConfigurationError('所选模型不属于当前平台，请检查 JEV_MODEL。 / Unsupported model.');
+  return { ...preset, provider, apiKey, model };
 }
 
 export function providerStatus(

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RUBRIC, type Message, type Relation } from "../shared/types";
 import { notebookStore, type SavedConversation } from "./storage";
-import { conversationInScene, emptyConversation, newNotebook, organizeNotebook, withoutMessages, summarizeNotebook, type Notebook, type NotebookSummary } from "./notebooks";
+import { emptyConversation, newNotebook, organizeNotebook, withoutMessages, summarizeNotebook, type Notebook, type NotebookSummary } from "./notebooks";
 import type { useAnalysis } from "./useAnalysis";
 
 export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
@@ -29,7 +29,8 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
   }
   function snapshot(): SavedConversation {
     return { schema: 1, rubric: RUBRIC, messages, self, other, relation, lines: a.lines,
-      events: a.events, overview: a.overview, trend: a.trend, analyzedCount: a.analyzedCount, completed: a.status === "complete" };
+      events: a.events, overview: a.overview, trend: a.trend, analyzedCount: a.analyzedCount,
+      completed: a.status === "complete" && a.overviewFresh && a.analyzedCount === messages.length };
   }
   function capture(): Notebook | null {
     if (!active) return null;
@@ -67,7 +68,7 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
     pending.current = capture();
     if (a.status !== "loading") flush();
     else if (!timer.current) timer.current = setTimeout(flush, 750);
-  }, [ready, active, messages, input, self, other, relation, a.lines, a.events, a.overview, a.trend, a.analyzedCount, a.status]);
+  }, [ready, active, messages, input, self, other, relation, a.lines, a.events, a.overview, a.overviewFresh, a.trend, a.analyzedCount, a.status]);
   useEffect(() => {
     const hidden = () => { if (timer.current) flush(); };
     window.addEventListener("pagehide", hidden); document.addEventListener("visibilitychange", hidden);
@@ -103,12 +104,18 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
   }
   function changeRelation(next: Relation) {
     if (next === relation || changing.current || !active || storageError) return;
-    const note = capture()!;
-    scenes.current = note.scenes;
-    const saved = conversationInScene(note, next);
-    setRelation(next); a.restore(saved);
-    setWorkspaceNotice(saved.completed ? "已恢复这个场景的分析，没有调用模型。"
-      : messages.length ? "原场景分析已保留。新场景尚未分析，需要时点击继续分析。" : "");
+    // Save the departing scene before restoring and saving the destination.
+    return transition(async () => {
+      const saved = await notebookStore.load(active.id);
+      if (!saved || saved.deletedAt) throw new Error("手记不存在");
+      const note = organizeNotebook(saved, saved.title, saved.contact, next);
+      await persist(note);
+      return note;
+    }).then((note) => {
+      if (!note) return;
+      setWorkspaceNotice(note.conversation.completed ? "已恢复这个场景的分析，没有调用模型。"
+        : note.conversation.messages.length ? "原场景分析已保留。新场景尚未分析，需要时点击继续分析。" : "");
+    });
   }
   function rename(title: string, contact: string, scene = relation) {
     if (!active) return Promise.resolve(undefined);

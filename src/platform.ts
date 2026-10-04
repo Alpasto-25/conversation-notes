@@ -1,5 +1,6 @@
 import type { AnalysisRequest } from "../shared/types";
-import { validateResult, ProviderError } from "../shared/provider-contract";
+import { ProviderError } from "../shared/provider-contract";
+import { evaluateWithDeepseekRepair } from "../shared/deepseek";
 import { isOfficialProviderUrl } from "../shared/provider-guides";
 import { RELEASES_URL, type BuildInfo } from "../shared/updates";
 
@@ -14,6 +15,7 @@ export type ApiStatus = {
   provider?: string;
   model?: string;
   error?: string;
+  profiles?: { provider: string; model: string; configured: boolean }[];
 };
 type NativeBridge = {
   call(id: string, method: string, payload: string): void;
@@ -119,8 +121,11 @@ export async function getApiStatus(): Promise<ApiStatus> {
   if (!response.ok) throw new Error("本机服务未响应");
   return response.json();
 }
-export function saveMobileConfig(provider: string, apiKey: string) {
-  return nativeCall<ApiStatus>("configure", { provider, apiKey });
+export function saveMobileConfig(provider: string, apiKey: string, model?: string) {
+  return nativeCall<ApiStatus>("configure", { provider, apiKey, model });
+}
+export function setNativeAppearance(theme: "system" | "light" | "dark") {
+  return nativeCall("setAppearance", { theme });
 }
 export function importDesktopConfig() {
   return nativeCall<ApiStatus | null>("importConfig");
@@ -161,13 +166,10 @@ export async function checkMobileConnection() {
       instructions: "Does the text mention the sky?",
     },
   };
-  const result = validateResult(
-    await nativeCall("evaluate", {
+  const result = await evaluateWithDeepseekRepair({
       state: "This is a connection test. The sky is blue.",
       questions,
-    }),
-    questions,
-  );
+    }, (payload, signal) => nativeCall("evaluate", payload, signal));
   return result.model;
 }
 export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal) {
@@ -189,10 +191,7 @@ export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal) {
       );
     const result = await analyzeWithEvaluator(
       valid.data,
-      async (payload, requestSignal) => {
-        const response = await nativeCall("evaluate", payload, requestSignal);
-        return validateResult(response, payload.questions);
-      },
+      (payload, requestSignal) => evaluateWithDeepseekRepair(payload, (request, signal) => nativeCall("evaluate", request, signal), requestSignal),
       signal,
     );
     return Response.json(result);

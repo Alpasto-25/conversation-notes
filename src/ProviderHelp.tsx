@@ -1,5 +1,5 @@
 import { useState, type MouseEvent } from "react";
-import { ArrowUpRight, ShieldCheck } from "lucide-react";
+import { ArrowUpRight, ChevronRight, ShieldCheck } from "lucide-react";
 import { BILLING_DISCLOSURE, PROVIDER_GUIDES, guideProvider } from "../shared/provider-guides";
 import { isNative, openOfficialProviderPage } from "./platform";
 
@@ -30,7 +30,7 @@ export function ProviderHelp({ provider, expanded = false }: { provider?: string
   return (
     <section className="provider-help" aria-label={`${info.name} API 获取与充值指引`}>
       <details key={info.name} open={expanded}>
-        <summary>如何获取 {info.name} API Key？</summary>
+        <summary><ChevronRight size={16} aria-hidden="true" />如何获取 {info.name} API Key？</summary>
         <ol>{info.keySteps.map((step) => <li key={step}>{step}</li>)}</ol>
         <p>{info.billingSteps}</p>
         <p>保存后可点击“测试连接”；测试和正式分析都会调用供应商 API，可能消耗额度或产生费用。</p>
@@ -41,7 +41,7 @@ export function ProviderHelp({ provider, expanded = false }: { provider?: string
         {link(info.docsUrl, "官方教程")}
       </div>
       <p className="external-page-note">将在浏览器打开供应商官网，本软件不收取任何款项，也不会向跳转链接附加 Key 或聊天内容。</p>
-      {error && <p role="alert" className="api-feedback">{error}</p>}
+      {error && <p role="alert" className="api-feedback error">{error}</p>}
     </section>
   );
 }

@@ -12,23 +12,25 @@ import {
   type Provider,
 } from "../server/provider-config";
 import { checkProvider, providerErrorMessage } from "../server/provider";
+import { MODEL_OPTIONS, defaultModel } from '../shared/models';
 
 export function updateConfiguration(
   text: string,
   provider: Provider,
   key: string,
+  model = defaultModel(provider),
 ) {
-  getProviderConfig({ JEV_PROVIDER: provider, JEV_API_KEY: key });
+  getProviderConfig({ JEV_PROVIDER: provider, JEV_API_KEY: key, JEV_MODEL: model });
   const values = parse(text);
   // Keep unrelated settings/comments and old provider credentials. The explicit
   // JEV_API_KEY always takes precedence, so switching cannot reuse another key.
   const lines = text
     .split(/\r?\n/)
     .filter(
-      (line) => !/^\s*(?:export\s+)?JEV_(PROVIDER|API_KEY)\s*=/.test(line),
+      (line) => !/^\s*(?:export\s+)?JEV_(PROVIDER|API_KEY|MODEL)\s*=/.test(line),
     );
   const suffix = lines.join("\n").trim();
-  return `JEV_PROVIDER=${provider}\nJEV_API_KEY='${key.trim()}'\n${suffix ? suffix + "\n" : ""}${values.PORT ? "" : "PORT=3178\n"}${values.HOST ? "" : "HOST=127.0.0.1\n"}`;
+  return `JEV_PROVIDER=${provider}\nJEV_MODEL=${model}\nJEV_API_KEY='${key.trim()}'\n${suffix ? suffix + "\n" : ""}${values.PORT ? "" : "PORT=3178\n"}${values.HOST ? "" : "HOST=127.0.0.1\n"}`;
 }
 
 export async function saveConfiguration(path: string, text: string) {
@@ -95,8 +97,8 @@ async function main() {
     }
     console.log(
       say(
-        "选择 Jev 平台（地址和模型自动配置）：",
-        "Choose a Jev provider (endpoint and model are automatic):",
+        "选择模型服务平台（接口地址自动配置）：",
+        "Choose a model provider (endpoint is automatic):",
       ),
     );
     const ids = Object.keys(PROVIDERS) as Provider[];
@@ -111,14 +113,24 @@ async function main() {
     let provider: Provider | undefined;
     while (!provider) {
       const selection = await ask(
-        say("选择 1 / 2 / 3：", "Select 1 / 2 / 3: "),
+        say("选择 1 / 2 / 3 / 4：", "Select 1 / 2 / 3 / 4: "),
       );
       provider = !selection
         ? current?.provider
-        : /^[123]$/.test(selection)
+        : /^[1234]$/.test(selection)
           ? ids[Number(selection) - 1]
           : undefined;
-      if (!provider) console.log(say("请输入 1、2 或 3。", "Enter 1, 2 or 3."));
+      if (!provider) console.log(say("请输入 1、2、3 或 4。", "Enter 1, 2, 3 or 4."));
+    }
+    const models = MODEL_OPTIONS.filter(option => option.provider === provider);
+    let model = current?.provider === provider ? current.model : defaultModel(provider);
+    if (models.length > 1) {
+      models.forEach((option, index) => console.log(`  ${index + 1}. ${option.label}`));
+      while (true) {
+        const selection = await ask(say('选择模型 1 / 2（回车保留）：', 'Select model 1 / 2 (Enter keeps current): '));
+        if (!selection) break;
+        if (/^[12]$/.test(selection)) { model = models[Number(selection) - 1].model; break; }
+      }
     }
     console.log(`${PROVIDERS[provider].name}: ${PROVIDERS[provider].keyUrl}`);
     if (provider === "vercel")
@@ -153,7 +165,7 @@ async function main() {
     controller.signal.throwIfAborted();
     await saveConfiguration(
       path,
-      updateConfiguration(previous, provider, apiKey),
+      updateConfiguration(previous, provider, apiKey, model),
     );
     console.log(
       say(
@@ -164,6 +176,7 @@ async function main() {
     const config = getProviderConfig({
       JEV_PROVIDER: provider,
       JEV_API_KEY: apiKey,
+      JEV_MODEL: model,
     });
     try {
       const result = await checkProvider(config, controller.signal);
