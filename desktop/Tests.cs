@@ -44,6 +44,22 @@ namespace ConversationNotes
         }
         private static async Task Run(string folder)
         {
+            Dictionary<string, object> export = new Dictionary<string, object> { { "action", "save" }, { "format", "txt" }, { "name", "conversation-notes-20261005-173000.txt" }, { "data", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("合成对话片段\n已有分析 👋")) } };
+            Check(System.Text.Encoding.UTF8.GetString(NoteExport.Decode(export)) == "合成对话片段\n已有分析 👋", "TXT export preserves UTF-8 and newlines");
+            foreach (string invalidName in new[] { "../config.dpapi", "C:\\private.txt", "conversation-notes-20261005-173000.png", "conversation-notes-20261005-173000.txt.exe" }) {
+                var invalid = new Dictionary<string, object>(export); invalid["name"] = invalidName;
+                Reject(() => NoteExport.Decode(invalid), 400, "export rejects paths and incompatible extensions");
+            }
+            foreach (string invalidData in new[] { "!invalid", "", "/w==", new string('A', 1866672) }) {
+                var invalid = new Dictionary<string, object>(export); invalid["data"] = invalidData;
+                Reject(() => NoteExport.Decode(invalid), 400, "export rejects malformed, oversized or non-UTF8 content");
+            }
+            using (var bitmap = new System.Drawing.Bitmap(1080, 2600)) using (var stream = new MemoryStream()) {
+                bitmap.Save(stream, System.Drawing.Imaging.ImageFormat.Png);
+                var picture = new Dictionary<string, object>(export); picture["format"] = "png"; picture["name"] = "conversation-notes-20261005-173000-p1.png"; picture["data"] = Convert.ToBase64String(stream.ToArray());
+                Check(NoteExport.Decode(picture).Length == stream.Length, "PNG export accepts a complete bounded card");
+                picture["data"] = export["data"]; Reject(() => NoteExport.Decode(picture), 400, "PNG export rejects disguised text");
+            }
             ConfigStore store = new ConfigStore(folder);
             string[] official = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<string[]>(File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "official-links.json")));
             foreach (string link in official) Check(OfficialLinks.IsAllowed(link, official), "official link allowed");
@@ -60,9 +76,16 @@ namespace ConversationNotes
             string deepKey = "synthetic-deepseek-key";
             store.Configure(new Dictionary<string, object> { { "provider", "deepseek" }, { "apiKey", deepKey }, { "model", "deepseek-flash" } });
             store.Configure(new Dictionary<string, object> { { "provider", "deepseek" }, { "apiKey", "" }, { "model", "deepseek-v4-pro" } });
-            Check(Json.Text(store.Read(), "apiKey") == deepKey && Json.Text(store.Read(), "model") == "deepseek-v4-pro", "DeepSeek model switch keeps its own key");
+            Check(Json.Text(store.Read(), "apiKey") == deepKey && Json.Text(store.Read(), "model") == "deepseek-flash", "removed Pro migrates to Flash and keeps its own key");
             ConfigStore restarted = new ConfigStore(folder);
-            Check(Json.Text(restarted.Read(), "model") == "deepseek-v4-pro", "model selection persists across restart");
+            Check(Json.Text(restarted.Read(), "model") == "deepseek-flash", "Flash migration persists across restart");
+            var legacyPro = store.Read(); legacyPro["model"] = "deepseek-v4-pro";
+            ((Dictionary<string, object>)((Dictionary<string, object>)legacyPro["profiles"])["deepseek"])["model"] = "deepseek-v4-pro";
+            byte[] legacyCipher = System.Security.Cryptography.ProtectedData.Protect(System.Text.Encoding.UTF8.GetBytes(Json.Encode(legacyPro)), System.Text.Encoding.UTF8.GetBytes("conversation-notes-windows-v1"), System.Security.Cryptography.DataProtectionScope.CurrentUser);
+            File.WriteAllBytes(Path.Combine(folder, "config.dpapi"), legacyCipher);
+            Check(Json.Text(Json.Decode(Json.Encode(store.Status())), "model") == "deepseek-flash", "legacy stored Pro status uses Flash");
+            Check(Convert.ToBase64String(File.ReadAllBytes(Path.Combine(folder, "config.dpapi"))) == Convert.ToBase64String(legacyCipher), "reading legacy Pro status does not rewrite encrypted configuration");
+            store.Configure(new Dictionary<string, object> { { "provider", "deepseek" }, { "apiKey", "" } });
             Check(!Json.Encode(store.Status()).Contains(deepKey) && !Json.Encode(store.Status()).Contains(TestKey), "profile summaries never return keys");
             string beforeInvalid = Convert.ToBase64String(File.ReadAllBytes(Path.Combine(folder, "config.dpapi")));
             Reject(() => store.Configure(new Dictionary<string, object> { { "provider", "deepseek" }, { "apiKey", "" }, { "model", "jev-1.13.0" } }), 400, "wrong-provider model rejected");
@@ -137,7 +160,11 @@ namespace ConversationNotes
                 Dictionary<string, object> exampleAnswers = (weightContext["answer_example"] as Dictionary<string, object>)["answers"] as Dictionary<string, object>;
                 Dictionary<string, object> exampleWeights = (exampleAnswers["evidence"] as Dictionary<string, object>)["weights"] as Dictionary<string, object>;
                 Check(exampleWeights.Count == 2 && Convert.ToDouble(exampleWeights["0"]) == 50 && Convert.ToDouble(exampleWeights["99"]) == 50, "DeepSeek long candidate example includes explicit zero weights");
-                foreach (string deepModel in new[] { "deepseek-flash", "deepseek-v4-pro" })
+                object prepared = Json.Decode("{\"messages\":[{\"role\":\"system\",\"content\":\"稳定规则\\n{\\\"a\\\":1}\"},{\"role\":\"user\",\"content\":\"场景 é\\n任务\"}]}")["messages"];
+                Dictionary<string, object> preparedRequest = Json.Decode(Json.Encode(ModelClient.DeepseekRequest(StructuredPayload()["state"], weightQuestions, "deepseek-flash", false, prepared)));
+                Check(Json.Encode(preparedRequest["messages"]) == Json.Encode(prepared), "canonical shared prompt strings are forwarded unchanged");
+                Reject(() => ModelClient.DeepseekRequest(StructuredPayload()["state"], weightQuestions, "deepseek-flash", false, new object[0]), 400, "invalid prepared prompt rejected");
+                foreach (string deepModel in new[] { "deepseek-flash" })
                 {
                     store.Configure(new Dictionary<string, object> { { "provider", "deepseek" }, { "apiKey", deepKey }, { "model", deepModel } });
                     handler.Run = async (request, token) => {
@@ -151,14 +178,28 @@ namespace ConversationNotes
                         Check(context["answer_keys"] is Dictionary<string, object> && context["answer_example"] is Dictionary<string, object>, "DeepSeek supplies an explicit answer format");
                         Check(!sent.ContainsKey("tools") && Json.Text(sent["response_format"] as Dictionary<string, object>, "type") == "json_object", "DeepSeek uses JSON mode");
                         return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Json.Encode(new {
-                            model = deepModel, choices = new[] { new { finish_reason = "tool_calls", message = new { content = (string)null,
+                            id = "synthetic-response-" + deepModel, model = deepModel, choices = new[] { new { finish_reason = "tool_calls", message = new { content = (string)null,
                                 tool_calls = new[] { new { id = "synthetic-call", type = "function", function = new { name = "submit_analysis", arguments = "{\"answers\":{\"a\":0.8}}" } } }, reasoning_content = "discard private reasoning" } } },
-                            usage = new { prompt_tokens = 20, completion_tokens = 10 } })) };
+                            usage = new { prompt_tokens = 20, completion_tokens = 10, prompt_cache_hit_tokens = 12, prompt_cache_miss_tokens = 8 } })) };
                     };
                     string result = Json.Encode(await client.Evaluate(StructuredPayload(), CancellationToken.None));
                     Check(result.Contains("answers") && result.Contains("input_tokens") && !result.Contains("reasoning"), "DeepSeek adapts to existing answer contract");
                     Check(Json.Text(Json.Decode(result), "format") == "deepseek-weights-v4", "DeepSeek uses the shared fixed weight decoder");
+                    Check(Json.Text(Json.Decode(result), "requestId") == "synthetic-response-" + deepModel, "provider response id survives native transport");
+                    Dictionary<string, object> tokens = Json.Decode(result)["usage"] as Dictionary<string, object>;
+                    Check(Convert.ToInt32(tokens["prompt_cache_hit_tokens"]) == 12 && Convert.ToInt32(tokens["prompt_cache_miss_tokens"]) == 8 && Convert.ToInt32(tokens["requests"]) == 1, "provider cache usage survives native transport");
                 }
+                Dictionary<string, object> compactPayload = StructuredPayload(); compactPayload["deepseekMessages"] = prepared;
+                handler.Run = async (request, token) => {
+                    Dictionary<string, object> sent = Json.Decode(await request.Content.ReadAsStringAsync());
+                    Check(Json.Encode(sent["messages"]) == Json.Encode(prepared), "evaluate forwards the shared protocol without rebuilding it");
+                    Check(!sent.ContainsKey("state") && !sent.ContainsKey("deepseekContext"), "only the prepared prompt reaches completions");
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Json.Encode(new {
+                        model = "deepseek-v4-pro", choices = new[] { new { finish_reason = "stop", message = new { content = "{\"answers\":{\"a\":0.8}}" } } },
+                        usage = new { prompt_tokens = 10, completion_tokens = 2, prompt_cache_hit_tokens = 6, prompt_cache_miss_tokens = 4 }
+                    })) };
+                };
+                Check(Json.Text(Json.Decode(Json.Encode(await client.Evaluate(compactPayload, CancellationToken.None))), "format") == "deepseek-weights-v4", "shared protocol uses the existing decoder");
                 store.Configure(Input("typesafe", ""));
                 store.Configure(Input("deepseek", ""));
                 Dictionary<string, object> repairPayload = StructuredPayload(); repairPayload["deepseekRepair"] = true;

@@ -20,10 +20,10 @@ const answers = {
   mentioned: { type: 'noul', noul: .9 },
 };
 const response = (content = JSON.stringify({ answers: { mood: { weights: { happy: 80, sad: 20 } }, quality: { weights: { '0': 0, '1': 20, '2': 80 } }, mentioned: .9 } })) => ({ model: 'deepseek-v4-pro', choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [{ id: 'synthetic-call', type: 'function', function: { name: DEEPSEEK_TOOL, arguments: content } }], reasoning_content: 'Never expose private reasoning' } }], usage: { prompt_tokens: 70, completion_tokens: 30 } });
-test('DeepSeek 使用自己的 Key 和两个官方模型，不借用其他平台的 Key', () => {
+test('DeepSeek 使用自己的 Key 和 Flash，旧 Pro 配置迁移到 Flash', () => {
   assert.throws(() => getProviderConfig({ JEV_PROVIDER: 'deepseek', TYPESAFE_API_KEY: 'synthetic-old-key' }), /API Key/);
   assert.equal(getProviderConfig({ JEV_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'synthetic-deep-key' }).model, 'deepseek-flash');
-  assert.equal(getProviderConfig({ JEV_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'synthetic-deep-key', JEV_MODEL: 'deepseek-v4-pro' }).model, 'deepseek-v4-pro');
+  assert.equal(getProviderConfig({ JEV_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'synthetic-deep-key', JEV_MODEL: 'deepseek-v4-pro' }).model, 'deepseek-flash');
   assert.throws(() => getProviderConfig({ JEV_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'synthetic-deep-key', JEV_MODEL: 'jev-1.13.0' }), /模型/);
   assert.throws(() => getProviderConfig({ JEV_PROVIDER: 'typesafe', JEV_API_KEY: 'synthetic-old-key', JEV_MODEL: 'deepseek-flash' }), /模型/);
 });
@@ -34,17 +34,23 @@ test('结构化评分使用 JSON 模式和固定候选表，原文作为数据�
   assert.equal('tools' in request, false);
   assert.equal(request.thinking.type, 'disabled');
   assert.equal(request.stream, false);
-  const context=JSON.parse(request.messages[1].content);
-  assert.deepEqual({state:context.state,questions:context.questions},payload);
-  assert.deepEqual(context.answer_keys,{mood:['happy','sad'],quality:['0','1','2']});
-  assert.deepEqual(context.answer_example,deepseekAnswerFormat(payload.questions).answer_example);
+  const scene=JSON.parse(request.messages[1].content.match(/<scene>\n([\s\S]+?)\n<\/scene>/)![1]);
+  const task=JSON.parse(request.messages[1].content.match(/<task>\n([\s\S]+?)\n<\/task>/)![1]);
+  const rules=JSON.parse(request.messages[0].content.match(/<rules>\n([\s\S]+?)\n<\/rules>/)![1]);
+  assert.deepEqual(scene,payload.state);
+  for(const entry of task.questions) {
+    const original=payload.questions[entry.id as keyof typeof payload.questions], template=rules.templates[entry.template];
+    assert.equal(template.instructions,original.instructions);
+    assert.equal(template.type,original.type);
+    if(original.type!=='noul') assert.deepEqual(template.criteria,original.criteria);
+  }
   assert.match(request.messages[0].content, /untrusted data/);
   assert.equal(JSON.stringify(payload), before);
 });
 test('DeepSeek 的分布、评分和用量沿用现有校验，丢弃推理内容', () => {
   const result = deepseekResult(response(), payload.questions);
   assert.deepEqual(result.answers, answers);
-  assert.deepEqual(result.usage, { input_tokens: 70, output_tokens: 30 });
+  assert.deepEqual(result.usage, { input_tokens: 70, output_tokens: 30, requests: 1 });
   assert.equal(result.model, 'deepseek-v4-pro');
   assert.doesNotMatch(JSON.stringify(result), /reasoning|Never expose/);
 });
@@ -66,11 +72,11 @@ test('实际传输使用 chat/completions 和所选模型，保留 Jev 评分返
     assert.equal(url, 'https://api.deepseek.com/chat/completions');
     assert.equal(init?.redirect, 'error');
     const body = JSON.parse(String(init?.body));
-    assert.equal(body.model, 'deepseek-v4-pro');
+    assert.equal(body.model, 'deepseek-flash');
     assert.equal(body.messages[0].role, 'system');
-    const context=JSON.parse(body.messages[1].content);
-    assert.deepEqual({state:context.state,questions:context.questions},payload);
-    return Response.json(response());
+    const scene=JSON.parse(body.messages[1].content.match(/<scene>\n([\s\S]+?)\n<\/scene>/)![1]);
+    assert.deepEqual(scene,payload.state);
+    return Response.json({ ...response(), model:'deepseek-flash' });
   };
   const result = await evaluate(payload, undefined, config, fetchImpl);
   assert.deepEqual(result.answers, answers);
@@ -219,7 +225,7 @@ test('每题必须有合法正权重，省略候选按协议为零',()=>{
   assert.equal((validateNativeResult({...raw,answers:{...raw.answers,mood:{weights:{happy:100}}}},payload.questions).answers.mood as any).choice,'happy');
   for(const weights of [{},{happy:80,sad:20,thanks:1},{happy:0,sad:0}])
     assert.throws(()=>validateNativeResult({...raw,answers:{...raw.answers,mood:{weights}}},payload.questions));
-  assert.throws(()=>validateNativeResult({...raw,answers:{...raw.answers,mood:{weights:[{candidate:'happy',weight:100}]}}},payload.questions));
+  assert.equal((validateNativeResult({...raw,answers:{...raw.answers,mood:{weights:[{candidate:'happy',weight:100}]}}},payload.questions).answers.mood as any).choice,'happy');
 });
 
 test('仅补全 Pro 不合法的单题，保留已通过结果并累计两次真实用量',async()=>{
@@ -239,7 +245,11 @@ test('仅补全 Pro 不合法的单题，保留已通过结果并累计两次真
   });
   assert.equal(requests.length,2);
   assert.deepEqual(result.answers,answers);
-  assert.deepEqual(result.usage,{input_tokens:75,output_tokens:33});
+  const {details,...totals}=result.usage;
+  assert.deepEqual(totals,{input_tokens:75,output_tokens:33});
+  assert.equal(details?.length,2);
+  assert.deepEqual(details?.map(d=>d.repair),[false,true]);
+  assert.equal(details?.reduce((sum,d)=>sum+d.input_tokens,0),totals.input_tokens);
 });
 
 test('单题补全的 JSON 返回保持完整分布校验，非零未知候选不能偷偷删除',()=>{

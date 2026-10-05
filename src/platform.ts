@@ -1,6 +1,6 @@
 import type { AnalysisRequest } from "../shared/types";
-import { ProviderError } from "../shared/provider-contract";
-import { evaluateWithDeepseekRepair } from "../shared/deepseek";
+import { ProviderError, analysisFailureDetails } from "../shared/provider-contract";
+import { evaluateWithDeepseekRepair, evaluateCausalDeepseek, nativeDeepseekPayload, type DeepseekRequest } from "../shared/deepseek";
 import { isOfficialProviderUrl } from "../shared/provider-guides";
 import { RELEASES_URL, QUARK_DOWNLOAD_URL, type BuildInfo } from "../shared/updates";
 
@@ -71,6 +71,7 @@ function nativeCall<T>(
   method: string,
   payload: unknown = {},
   signal?: AbortSignal,
+  timeout = 90000,
 ): Promise<T> {
   const bridge = window.DialogueNative;
   if (!bridge)
@@ -90,8 +91,8 @@ function nativeCall<T>(
     const timer = setTimeout(() => {
       bridge.cancel(id);
       finish();
-      reject(new Error("连接超时，请检查网络后重试。"));
-    }, 90000);
+      reject(new Error(method === "exportNotes" ? "保存等待超时，请重新导出。" : "连接超时，请检查网络后重试。"));
+    }, timeout);
     pending.set(id, {
       resolve: (value) => {
         finish();
@@ -129,6 +130,21 @@ export function setNativeAppearance(theme: "system" | "light" | "dark") {
 }
 export function importDesktopConfig() {
   return nativeCall<ApiStatus | null>("importConfig");
+}
+export async function exportNotes(format: "png" | "txt", data: string, page = 1, share = false) {
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").slice(0,15).replace("T", "-");
+  const name = `conversation-notes-${stamp}${format === "png" ? `-p${page}` : ""}.${format}`;
+  const encoded = format === "png" ? data.replace(/^data:image\/png;base64,/, "") : (() => {
+    const bytes = new TextEncoder().encode(data); let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i+8192));
+    return btoa(binary);
+  })();
+  if (encoded.length > 1866668) throw new Error("内容较多，请减少所选消息后导出。");
+  if (isNative) return nativeCall<{ saved?: boolean; opened?: boolean; cancelled?: boolean }>("exportNotes", { action:share ? "share" : "save", format, name, data:encoded }, undefined, 300000);
+  const blob = format === "png" ? await (await fetch(data)).blob() : new Blob([data], {type:"text/plain;charset=utf-8"});
+  const link = document.createElement("a"), url = URL.createObjectURL(blob);
+  link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return { saved:true };
 }
 export function openOfficialProviderPage(url: string) {
   if (!isOfficialProviderUrl(url)) return Promise.reject(new Error("只允许打开已核对的供应商官方入口。"));
@@ -174,7 +190,7 @@ export async function checkMobileConnection() {
   const result = await evaluateWithDeepseekRepair({
       state: "This is a connection test. The sky is blue.",
       questions,
-    }, (payload, signal) => nativeCall("evaluate", payload, signal));
+    }, (payload, signal) => nativeCall("evaluate", nativeDeepseekPayload(payload), signal));
   return result.model;
 }
 export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal) {
@@ -196,7 +212,12 @@ export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal) {
       );
     const result = await analyzeWithEvaluator(
       valid.data,
-      (payload, requestSignal) => evaluateWithDeepseekRepair(payload, (request, signal) => nativeCall("evaluate", request, signal), requestSignal),
+      async (payload, requestSignal) => {
+        const status = await getApiStatus();
+        const evaluateOnce = (request: DeepseekRequest, signal?: AbortSignal) => nativeCall("evaluate", nativeDeepseekPayload(request), signal);
+        return status.provider === "deepseek" ? evaluateCausalDeepseek(payload, evaluateOnce, requestSignal)
+          : evaluateWithDeepseekRepair(payload, (request, signal) => nativeCall("evaluate", request, signal), requestSignal);
+      },
       signal,
     );
     return Response.json(result);
@@ -205,6 +226,7 @@ export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal) {
     return Response.json(
       {
         error: error instanceof Error ? error.message : "分析失败，请重试。",
+        ...analysisFailureDetails(error),
       },
       { status: error instanceof ProviderError ? error.status : 502 },
     );

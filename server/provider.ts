@@ -2,7 +2,7 @@ import type { Questions, SystemOneRequest } from "@typesafe-ai/sdk";
 import { setTimeout as delay } from "node:timers/promises";
 import { getProviderConfig, type ProviderConfig } from "./provider-config";
 import { ProviderError, validateResult } from "../shared/provider-contract";
-import { deepseekRequest, deepseekEnvelope, evaluateWithDeepseekRepair } from '../shared/deepseek';
+import { deepseekRequest, deepseekEnvelope, evaluateCausalDeepseek, type DeepseekRequest } from '../shared/deepseek';
 export { ProviderError, validateResult } from "../shared/provider-contract";
 
 export function providerErrorMessage(error: unknown): string {
@@ -30,12 +30,12 @@ function httpError(status: number, name: string) {
 // Native contracts: docs.typesafe.ai/api, Vercel's /sdks-and-apis/typesafe,
 // and OpenRouter's /api/alpha/decisions. These are NOT chat/completions APIs.
 export async function evaluate(
-  payload: SystemOneRequest<Questions>,
+  payload: DeepseekRequest,
   signal?: AbortSignal,
   config: ProviderConfig = getProviderConfig(),
   fetchImpl: typeof fetch = fetch,
 ) {
-  if (config.provider === 'deepseek') return evaluateWithDeepseekRepair(payload, (request, requestSignal) => evaluateOnce(request, requestSignal, config, fetchImpl), signal);
+  if (config.provider === 'deepseek') return evaluateCausalDeepseek(payload, (request, requestSignal) => evaluateOnce(request, requestSignal, config, fetchImpl), signal);
   return validateResult(await evaluateOnce(payload, signal, config, fetchImpl), payload.questions);
 }
 async function evaluateOnce(payload: SystemOneRequest<Questions>, signal: AbortSignal | undefined, config: ProviderConfig, fetchImpl: typeof fetch) {
@@ -50,7 +50,7 @@ async function evaluateOnce(payload: SystemOneRequest<Questions>, signal: AbortS
         Authorization: `Bearer ${config.apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(config.provider === 'deepseek' ? deepseekRequest(payload, config.model) : { ...payload, model: config.model }),
+      body: JSON.stringify(config.provider === 'deepseek' ? deepseekRequest(payload, config.model) : { state: payload.state, questions: payload.questions, model: config.model }),
       signal: AbortSignal.any([requestSignal, AbortSignal.timeout(config.provider === 'deepseek' ? 60000 : 30000)]),
     });
     if (!response.ok) {
@@ -95,7 +95,10 @@ async function evaluateOnce(payload: SystemOneRequest<Questions>, signal: AbortS
         `${config.name} 返回格式异常，请重试 / Invalid response`,
       );
     }
-    return config.provider === 'deepseek' ? deepseekEnvelope(data) : validateResult(data, payload.questions);
+    if (config.provider === 'deepseek') {
+      const result = deepseekEnvelope(data); result.usage.requests = attempt + 1; return result;
+    }
+    return validateResult(data, payload.questions);
   }
 }
 

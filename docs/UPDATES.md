@@ -33,7 +33,7 @@ Vite 为每次构建生成平台、可见版本、唯一 `buildId` 和 UTC `buil
 3. 运行下列命令（路径相对于标准 checkout）：
 
    ```powershell
-   node --import tsx scripts/prepare-release.ts outputs outputs/Release-notes-1.1.2.md
+   node --import tsx scripts/prepare-release.ts outputs outputs/Release-notes-1.1.3.md
    ```
 
    早期外层 `outputs/crush-monitor` 布局使用上一级 `outputs`。脚本使用 `package.json` 的版本，从便携 ZIP/APK 内读取真实构建信息，并生成说明末尾的机器注释与对应版本的校验表，本身不上传任何数据。

@@ -1,4 +1,4 @@
-import { defaultModel, supportsModel } from '../shared/models';
+import { normalizeModel, supportsModel } from '../shared/models';
 export const PROVIDERS = {
   typesafe: {
     name: "TypeSafe",
@@ -60,7 +60,7 @@ export function getProviderConfig(
     throw new ConfigurationError(
       "这看起来是 OpenRouter Key，请选择 openrouter。 / Select OpenRouter for this key.",
     );
-  const model = env.JEV_MODEL?.trim() || defaultModel(provider);
+  const model = normalizeModel(provider, env.JEV_MODEL?.trim() || '');
   if (!supportsModel(provider, model)) throw new ConfigurationError('所选模型不属于当前平台，请检查 JEV_MODEL。 / Unsupported model.');
   return { ...preset, provider, apiKey, model };
 }

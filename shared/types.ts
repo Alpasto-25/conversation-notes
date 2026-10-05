@@ -1,5 +1,6 @@
 import type { MemoryEvent, MemoryUpdate } from "./memory";
 import type { AffinityDimension } from "./affinity";
+import type { TokenUsage } from "./usage";
 export type Relation =
   | "general"
   | "new"
@@ -82,7 +83,7 @@ export type AnalysisResponse = {
   rubricVersion: string;
   overview?: Overview;
   lines?: LineResult[];
-  usage: { input_tokens: number; output_tokens: number };
+  usage: TokenUsage;
   latencyMs: number;
 };
 export const MODEL = "jev-1.13.0";

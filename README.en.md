@@ -1,6 +1,6 @@
 # Conversation Notes
 
-Version 1.1.2 adds a startup dialog when a verified update is available and a saved appearance choice (System / Light / Dark). It includes the mobile drawer, analysis-preserving reading view, scene-result cache, and DeepSeek Flash / Pro fixes developed since 1.1.2. Update checks do not call a model or install anything automatically.
+Version 1.1.3 adds selected-message PNG / TXT sharing, bulk notebook management and moves, a resizable desktop sidebar, and analysis usage details. It fixes clipped labels in shared images and keeps the existing visual design. DeepSeek offers Flash only; saved appearance settings and startup update reminders remain available. Update checks do not call a model or install anything automatically.
 
 [简体中文](README.md)
 
@@ -12,9 +12,9 @@ A local-first tool for two-person text conversations: emotions, intentions, expr
 
 Get packages from the [Quark resource folder](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA), extraction code `LQxA`. The [latest GitHub Release](https://github.com/Alpasto-25/conversation-notes/releases/latest) remains available for backup downloads and release notes:
 
-- Windows installer: `ConversationNotes-Setup-1.1.2-x64.exe`.
-- Windows portable: extract `ConversationNotes-Portable-1.1.2-x64.zip` and run `ConversationNotes.exe`.
-- Android 8.0+: `conversation-notes-1.1.2.apk`.
+- Windows installer: `ConversationNotes-Setup-1.1.3-x64.exe`.
+- Windows portable: extract `ConversationNotes-Portable-1.1.3-x64.zip` and run `ConversationNotes.exe`.
+- Android 8.0+: `conversation-notes-1.1.3.apk`.
 
 Windows requires Windows 10 1809 / Windows 11 and [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/); Node.js is not needed. Windows packages are not commercially code-signed; Android uses a local signing certificate. Check the Release SHA256 values and keep security protections enabled. Install updates over the existing app; do not uninstall Android first.
 
@@ -25,6 +25,8 @@ Windows requires Windows 10 1809 / Windows 11 and [WebView2 Runtime](https://dev
 3. Click “开始分析” (Analyze); add more messages to continue.
 
 Conversation folders group separate notebooks by scene and person. Creating a notebook keeps previous records; switching restores saved text and analysis without model calls. Imports can also be saved without analysis.
+
+Local test changes (unpublished): tap the Move icon or long-press and drag a notebook into a folder, with hover expansion and edge scrolling. Android also retains swipe-to-move, and multiple notebooks can move together. Moving retains text, drafts and all scene analyses. Share opens a full-screen chat preview; hold to select, then tap to select or deselect more messages. PNG captures the original bubbles, avatars and analysis chips, paginating long content. TXT is intended for deeper analysis by another AI and includes complete saved per-message distributions. The recycle bin supports batch restore/deletion and confirmed emptying. Common actions use accessible icons. Android supports the system share sheet and document picker; Windows saves files. Historical model identities are retained, and legacy Pro settings use Flash without replacing the key.
 
 Organize names, contacts and scenes, sort notebooks, and keep collapsed-group preferences. Deleted notebooks go to a recoverable recycle bin. Single-message deletion requires confirmation and clears analysis that could depend on the removed context, without automatically rerunning it. The desktop layout expands with a maximized window.
 
@@ -45,9 +47,9 @@ Two-person text only. The app does not connect to messaging accounts or read the
 
 Choose [TypeSafe](https://console.typesafe.ai/keys), [Vercel AI Gateway](https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai-gateway%2Fapi-keys), [OpenRouter](https://openrouter.ai/settings/keys), or [DeepSeek](https://platform.deepseek.com/api_keys). Use a key from the selected provider.
 
-Version 1.1.2 adds DeepSeek Flash / Pro and a quick model selector beside the analysis scene. Each provider's key is encrypted locally and retained when switching; existing Jev settings remain compatible. Switching does not call a model or erase previous results. It affects future analyses. Model latency, results and prices vary; network conditions and provider load also affect response time.
+Version 1.1.2 adds DeepSeek Flash and a quick model selector beside the analysis scene. Each provider's key is encrypted locally and retained when switching; existing Jev settings remain compatible. Switching does not call a model or erase previous results. It affects future analyses. Model latency, results and prices vary; network conditions and provider load also affect response time.
 
-DeepSeek Flash / Pro use JSON mode with a the full list of allowed keys per question, preventing event and intent candidates from being mixed. The app normalizes relative candidate weights into probabilities and scores, so long imported records no longer depend on manually summed probabilities or positional arrays. Missing questions, unknown candidates with nonzero weight, all-zero or invalid weights remain rejected. Invalid sub-answers get one targeted JSON-mode repair with valid answers retained and actual usage added; a failed repair reports an error and keeps completed progress. Zero placeholders have no effect on scores and earlier response formats remain compatible. Mobile empty cards no longer scroll internally or reserve space for the chat expand button; short screens scroll the whole page, and imported conversations retain the existing chat scroller.
+DeepSeek Flash use JSON mode with a the full list of allowed keys per question, preventing event and intent candidates from being mixed. The app normalizes relative candidate weights into probabilities and scores, so long imported records no longer depend on manually summed probabilities or positional arrays. Missing questions, unknown candidates with nonzero weight, all-zero or invalid weights remain rejected. Invalid sub-answers get one targeted JSON-mode repair with valid answers retained and actual usage added; a failed repair reports an error and keeps completed progress. Zero placeholders have no effect on scores and earlier response formats remain compatible. Mobile empty cards no longer scroll internally or reserve space for the chat expand button; short screens scroll the whole page, and imported conversations retain the existing chat scroller.
 
 **The software is free and offers no recharge, payments, or key sales. Users obtain their own keys and pay model providers directly for API calls and credits.** Analysis, examples, and connection tests may spend credits; free allowances, pricing, and model access depend on the provider.
 

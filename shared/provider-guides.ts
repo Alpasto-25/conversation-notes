@@ -5,10 +5,10 @@ export const PROVIDER_GUIDES = {
     keySteps: [
       '登录 DeepSeek 官方开放平台；聊天应用账号或订阅不等于 API 额度。',
       '进入 API keys 页面创建并妥善保存 Key，不要发送到聊天、截图或公开仓库。',
-      '回到本软件选择 DeepSeek，粘贴 Key 并保存一次；Flash 和 Pro 之后可以直接切换，无需重新填写 Key。',
+      '回到本软件，选择 DeepSeek Flash，粘贴 Key 并保存。',
     ],
-    billingSteps: '在官方开放平台查看用量、余额及充值入口。Flash 与 Pro 的价格和响应速度可能不同，以官方当前信息为准；本软件不收取模型费用。',
-    billingLabel: '官方用量 / 余额入口',
+    billingSteps: '在官方开放平台查看用量、余额与充值入口。模型费率以官网当前信息为准。',
+    billingLabel: '用量与余额',
   },
   typesafe: {
     name: "TypeSafe",
@@ -21,7 +21,7 @@ export const PROVIDER_GUIDES = {
       "回到本软件，选择 TypeSafe，只粘贴 Key 本身，然后保存配置。",
     ],
     billingSteps: "进入官方控制台查看账号额度、用量与计费信息；是否提供充值及其入口，以控制台当前显示为准。本软件不承诺永久免费或无限额度。",
-    billingLabel: "官方额度与计费入口",
+    billingLabel: "额度与计费",
   },
   vercel: {
     name: "Vercel AI Gateway",
@@ -34,7 +34,7 @@ export const PROVIDER_GUIDES = {
       "回到本软件，选择 Vercel AI Gateway，粘贴该平台的 Key 并保存；不要使用普通 Vercel 访问令牌替代它。",
     ],
     billingSteps: "进入官方 AI Gateway 页面，点击右上角的 Credits 余额查看额度或购买积分。账号验证、可用模型、付款方式和费用以 Vercel 官方为准；请自行确认，不要误开自动充值。",
-    billingLabel: "官方余额 / 充值页",
+    billingLabel: "余额与充值",
   },
   openrouter: {
     name: "OpenRouter",
@@ -47,7 +47,7 @@ export const PROVIDER_GUIDES = {
       "回到本软件，选择 OpenRouter，只粘贴 Key 本身并保存；其他平台的 Key 不能混用。",
     ],
     billingSteps: "进入官方 Settings → Credits 页面查看余额或自行购买积分。付款手续费、模型价格及支持的付款方式以官方页面为准，不要向软件作者或第三方代充转账。",
-    billingLabel: "官方余额 / 充值页",
+    billingLabel: "余额与充值",
   },
 } as const;
 
@@ -66,7 +66,7 @@ export const BILLING_DISCLOSURE = {
   title: "软件免费，模型服务费用自理",
   software: "本软件免费使用，不提供任何充值、代充、收款或支付功能，也不出售或赠送 API Key。",
   responsibility: "所有 API Key 均由模型供应商或其官方 API 平台提供，需要用户自行注册、申请并管理；模型调用、额度购买和充值费用由用户自费承担，与本软件无关。",
-  external: "下面的入口只跳转供应商官方网页，付款及售后由你与供应商直接处理。免费额度、费率、限额及账号要求可能变化，以供应商官方信息为准。",
+  external: "只跳转供应商官方网页，额度和费用以供应商官方信息为准。",
 } as const;
 
 export const ONBOARDING_KEY = "conversation-notes-onboarding-v1";

@@ -5,6 +5,7 @@ import { join, dirname } from "node:path";
 import { analyze, requestSchema } from "./analysis";
 import { providerStatus, ConfigurationError } from "./provider-config";
 import { ProviderError, providerErrorMessage } from "./provider";
+import { analysisFailureDetails } from '../shared/provider-contract';
 import { createReleaseChecker } from "./updates";
 const app = express();
 app.disable("x-powered-by");
@@ -86,6 +87,7 @@ app.post("/api/analyze", async (req, res) => {
           error instanceof ConfigurationError || error instanceof ProviderError
             ? error.message
             : providerErrorMessage(error),
+        ...analysisFailureDetails(error),
       });
   } finally {
     active--;

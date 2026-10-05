@@ -1,15 +1,25 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useNotebooks } from "./useNotebooks";
 import { ConversationFolders } from "./ConversationFolders";
+import { NotebookTrash } from "./NotebookTrash";
+import { MoveNotebook } from "./MoveNotebook";
+import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
+import { ChatMessage } from "./ChatMessage";
+import { IconButton } from "./IconButton";
+import { dismissNotebookDrag } from "./useNotebookDrag";
+import type { ShareSource } from "./share-content";
+import { SidebarResize } from "./SidebarResize";
+import { ToggleSelect, dismissSelect } from "./ToggleSelect";
+import { useDismissMotion } from "./useDismissMotion";
 import { MobileDrawer, type MobileDrawerHandle } from "./MobileDrawer";
 import { ModelSelector, type ModelSelection } from './ModelSelector';
 import { useChatReading } from './useChatReading';
 import { TooltipLayer } from "./TooltipLayer";
 import { lockOverlayBackground } from "./overlay-lock";
 import { emptyConversation, type NotebookSummary } from "./notebooks";
-import { INTENTS, topIntents } from "../shared/intents";
+import { INTENTS } from "../shared/intents";
 import { REPLY_RATINGS, replyRating } from "../shared/ratings";
-import { EMOTIONS, topEmotions } from "../shared/labels";
+import { EMOTIONS } from "../shared/labels";
 import {
   useEffect,
   useLayoutEffect,
@@ -43,6 +53,12 @@ import {
   Menu,
   Maximize2,
   Minimize2,
+  Share2,
+  BarChart3,
+  History,
+  CircleAlert,
+  Square,
+  ArrowLeft,
 } from "lucide-react";
 import { parseChat, toMessages, mergeMessages } from "../shared/parser";
 import {
@@ -59,6 +75,8 @@ import {
 } from "../shared/types";
 import { exampleForRelation } from "../shared/fixtures";
 import { useAnalysis } from "./useAnalysis";
+import { AnalysisUsage } from "./AnalysisUsage";
+import { sameAnalysisModel } from "../shared/usage";
 import { isMobile, isDesktop, isNative, getApiStatus, type ApiStatus } from "./platform";
 import { MobileSettings } from "./MobileSettings";
 import { BillingNotice, ProviderHelp } from "./ProviderHelp";
@@ -75,27 +93,22 @@ function Modal({
   title,
   children,
   close,
+  suspended = false,
 }: {
   title: string;
   children: ReactNode;
   close: () => void;
+  suspended?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(close), timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const [closing, setClosing] = useState(false);
-  closeRef.current = close;
-  const dismiss = useCallback(() => {
-    if (timer.current) return;
-    if (matchMedia("(prefers-reduced-motion: reduce)").matches) { closeRef.current(); return; }
-    setClosing(true);
-    const duration = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--motion-panel"));
-    timer.current = setTimeout(() => closeRef.current(), duration * 1000);
-  }, []);
+  const { closing, dismiss } = useDismissMotion(close);
   useLayoutEffect(() => {
+    if (suspended) return;
     const old = document.activeElement as HTMLElement;
     ref.current?.focus();
     const unlock = lockOverlayBackground(document.querySelector<HTMLElement>(".workspace"));
     const onKey = (e: KeyboardEvent) => {
+      if (Array.from(document.querySelectorAll(".overlay:not([inert]) .modal")).at(-1) !== ref.current) return;
       if (e.key === "Escape") {
         // The first Escape belongs to an open native select picker.
         if (CSS.supports("selector(select:open)") && ref.current?.querySelector("select:open")) return;
@@ -118,17 +131,18 @@ function Modal({
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      clearTimeout(timer.current);
       document.removeEventListener("keydown", onKey);
       unlock();
       if (old?.isConnected && old.getClientRects().length && !old.closest("[inert]")) old.focus();
       else document.querySelector<HTMLButtonElement>(".mobile-menu-toggle")?.focus();
     };
-  }, []);
+  }, [suspended]);
   return (
     <div
       className={`overlay${closing ? " is-closing" : ""}`}
-      onMouseDown={(e) => e.target === e.currentTarget && dismiss()}
+      inert={suspended}
+      aria-hidden={suspended || undefined}
+      onMouseDown={(e) => !suspended && e.target === e.currentTarget && dismiss()}
     >
       <div
         ref={ref}
@@ -158,18 +172,24 @@ export default function App() {
   const updates = useUpdates();
   const appearance = useAppearance();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState<'current' | 'failed' | false>(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const drawer = useRef<MobileDrawerHandle>(null);
   const closeMenu = useCallback(() => drawer.current?.close(), []);
-  const workspace = useRef<HTMLDivElement>(null), menuButton = useRef<HTMLButtonElement>(null);
+  const workspace = useRef<HTMLDivElement>(null), menuButton = useRef<HTMLButtonElement>(null), notebookFrame = useRef<HTMLElement>(null);
   const [libraryOpen, setLibraryOpen] = useState(false), [editingNotebook, setEditingNotebook] = useState(false);
   const [editTitle, setEditTitle] = useState(""), [editContact, setEditContact] = useState("");
   const [editScene, setEditScene] = useState<Relation>("general"), [trashOpen, setTrashOpen] = useState(false);
-  const [notebookDelete, setNotebookDelete] = useState<{ note: NotebookSummary; permanent: boolean } | null>(null);
+  const [notebookDelete, setNotebookDelete] = useState<{ notes: NotebookSummary[]; permanent: boolean; empty: boolean } | null>(null);
   const [messageDelete, setMessageDelete] = useState<Message | null>(null);
-  const [importScene, setImportScene] = useState<Relation>("general"), [importTarget, setImportTarget] = useState<"new" | "append">("new"),
+  const [movingNotes, setMovingNotes] = useState<NotebookSummary[] | null>(null);
+  const sharePreview = useRef<ShareDialogHandle>(null);
+  const [shareSource, setShareSource] = useState<ShareSource | null>(null);
+  const [importScene, setImportScene] = useState<Relation>("general"), [importTarget, setImportTarget] = useState<"current" | "new" | "append">("new"),
     [importTitle, setImportTitle] = useState("");
+  const [importDraft, setImportDraft] = useState("");
+  const [importModelSaving, setImportModelSaving] = useState(false);
   const [raw, setRaw] = useState(""),
     [parsed, setParsed] = useState<Parsed[]>([]),
     [role, setRole] = useState(""),
@@ -191,7 +211,7 @@ export default function App() {
   };
   const updatePrompt = updates.showReminder && ready && a.status !== "loading" && !switching &&
     !menuOpen && !onboarding && !appearanceOpen && !updatesOpen && !settings && !importing && !detail &&
-    !libraryOpen && !editingNotebook && !trashOpen && !notebookDelete && !messageDelete && !overlap;
+    !libraryOpen && !editingNotebook && !trashOpen && !notebookDelete && !messageDelete && !movingNotes && !shareSource && !overlap;
   useEffect(() => {
     let live = true;
     const refresh = () => {
@@ -230,10 +250,15 @@ export default function App() {
   }, [messages.length]);
   useEffect(() => {
     window.__notebookBack = () => {
+      if (dismissNotebookDrag()) return true;
+      if (dismissSelect()) return true;
       if (updatePrompt) { updates.snooze(); return true; }
+      if (usageOpen) { setUsageOpen(false); return true; }
       if (appearanceOpen) { setAppearanceOpen(false); return true; }
       if (messageDelete) { setMessageDelete(null); return true; }
       if (notebookDelete) { setNotebookDelete(null); return true; }
+      if (movingNotes) { setMovingNotes(null); return true; }
+      if (shareSource) { return sharePreview.current?.back() ?? true; }
       if (trashOpen) { setTrashOpen(false); return true; }
       if (editingNotebook) { setEditingNotebook(false); return true; }
       if (libraryOpen) { setLibraryOpen(false); return true; }
@@ -246,12 +271,12 @@ export default function App() {
         setOverlap(null);
         return true;
       }
-      if (importing) {
-        setImporting(false);
-        return true;
-      }
       if (settings) {
         setSettings(false);
+        return true;
+      }
+      if (importing) {
+        setImporting(false);
         return true;
       }
       if (detail) {
@@ -265,7 +290,7 @@ export default function App() {
     return () => {
       delete window.__notebookBack;
     };
-  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, updatePrompt, updates.snooze, libraryOpen, editingNotebook, trashOpen, notebookDelete, messageDelete, closeMenu, reading.expanded, reading.close]);
+  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, usageOpen, updatePrompt, updates.snooze, libraryOpen, editingNotebook, trashOpen, notebookDelete, messageDelete, movingNotes, shareSource, closeMenu, reading.expanded, reading.close]);
   const busy = a.status === "loading" || switching,
     ov = a.overview,
     value = ov?.affinity.value,
@@ -340,12 +365,17 @@ export default function App() {
     setParsed(p.messages);
     setRole(names.includes(self) ? self : names.includes("我") ? "我" : "");
     setImportScene(relation);
-    setImportTarget(!separate && messages.length && names.every((n) => n === self || n === other) ? "append" : "new");
-    setImportTitle(title);
+    const fillCurrent = notebooks.canFill(text);
+    setImportTarget(fillCurrent ? "current" : !separate && messages.length && names.every((n) => n === self || n === other) ? "append" : "new");
+    setImportTitle(fillCurrent && notebooks.active?.title !== "新手记" ? notebooks.active?.title || title : title);
+    setImportDraft(text);
     setImporting(true);
   }
   async function confirmImport(analyze = true) {
-    const names = [...new Set(parsed.map((x) => x.speaker))];
+    async function moveNotebookTo(notes: NotebookSummary[], scene: Relation, contact: string) {
+    if (await notebooks.move(notes.map(note => note.id), scene, contact)) setNotice("手记已移动");
+  }
+  const names = [...new Set(parsed.map((x) => x.speaker))];
     const nextOther = names.find((n) => n !== role) || "对方";
     const imported = toMessages(parsed, role);
     if (importTarget === "append" && canAppend) {
@@ -360,7 +390,9 @@ export default function App() {
       return;
     }
     const conversation = { ...emptyConversation(importScene), messages: imported, self: role, other: nextOther };
-    const note = await notebooks.create(conversation, importTitle || `${nextOther}的对话手记`, nextOther);
+    const note = importTarget === "current" && canFillCurrent
+      ? await notebooks.fill(conversation, importTitle || `${nextOther}的对话手记`, nextOther, importDraft)
+      : await notebooks.create(conversation, importTitle || `${nextOther}的对话手记`, nextOther);
     if (!note) return;
     setImporting(false);
     setNotice(""); setDetail(null); setOverlap(null);
@@ -379,39 +411,56 @@ export default function App() {
     setLibraryOpen(false); setNotice("");
     setEditTitle(note.title); setEditContact(note.contact); setEditScene(id === notebooks.active?.id ? relation : note.conversation.relation); setEditingNotebook(true);
   }
-  function requestNotebookDelete(note: NotebookSummary, permanent = false) {
-    setLibraryOpen(false); setTrashOpen(false); setSettings(false); setNotebookDelete({ note, permanent });
+  function requestNotebookDelete(note: NotebookSummary | NotebookSummary[], permanent = false, empty = false) {
+    const notes = Array.isArray(note) ? note : [note];
+    if (!notes.length) return;
+    setSettings(false); setNotebookDelete({ notes, permanent, empty });
   }
   async function confirmNotebookDelete() {
     if (!notebookDelete) return;
-    const result = notebookDelete.permanent ? await notebooks.purge(notebookDelete.note.id) : await notebooks.recycle(notebookDelete.note.id);
+    const ids = notebookDelete.notes.map(note => note.id);
+    const result = notebookDelete.permanent ? await notebooks.purgeMany(ids) : await notebooks.recycleMany(ids);
     if (!result) return;
-    setNotice(notebookDelete.permanent ? "已彻底删除这份手记，其他记录不受影响。" : "已移入回收站，可从对话文件夹恢复。其他记录不受影响。");
+    setNotice(notebookDelete.permanent ? `已彻底删除 ${ids.length} 份手记，其他记录不受影响。` : `已将 ${ids.length} 份手记移入回收站，可随时恢复。`);
     setNotebookDelete(null); setDetail(null);
   }
   async function confirmMessageDelete() {
     if (!messageDelete || !await notebooks.deleteMessages([messageDelete.id])) return;
     setMessageDelete(null); setDetail(null); setNotice("消息已删除。为避免使用已删除的上下文，该手记的旧分析已清除；需要时再点击继续分析。");
   }
-  const openTrash = () => { setLibraryOpen(false); setTrashOpen(true); };
+  const openTrash = () => setTrashOpen(true);
+  async function recoverNotebooks(notes: NotebookSummary[]) {
+    if (notes.length && await notebooks.recoverMany(notes.map(note => note.id))) setNotice(`已恢复 ${notes.length} 份手记，原文、分析和草稿保留。`);
+  }
   async function saveNotebookEdit() {
     if (!await notebooks.rename(editTitle, editContact, editScene)) return;
-    setEditingNotebook(false); setNotice("名称与分类已保存，没有调用模型。新场景需要时可点击继续分析。");
+    setEditingNotebook(false); setNotice("已保存；新场景可按需分析。");
+  }
+  async function moveNotebooks(scene: Relation, contact: string) {
+    if (!movingNotes || !await notebooks.move(movingNotes.map(note => note.id), scene, contact)) return;
+    setMovingNotes(null); setNotice("手记已移动，分析和草稿保留。");
+  }
+  async function moveNotebookTo(notes: NotebookSummary[], scene: Relation, contact: string) {
+    if (await notebooks.move(notes.map(note => note.id), scene, contact)) setNotice("手记已移动");
   }
   const names = [...new Set(parsed.map((x) => x.speaker))];
   const canAppend = !!messages.length && role === self && names.every((name) => name === self || name === other) && importScene === relation;
+  const canFillCurrent = notebooks.canFill(importDraft);
+  const effectiveImportTarget = importTarget === "current" && canFillCurrent ? "current" : importTarget === "append" && canAppend ? "append" : "new";
   const libraryDisabled = !ready || switching || !!storageError;
   const manageDisabled = libraryDisabled || busy;
-  const folderActions = { edit: (id: string) => void editNotebook(id), recycle: (note: NotebookSummary) => requestNotebookDelete(note),
+  const folderActions = { moveTo: (notes: NotebookSummary[], scene: Relation, contact: string) => void moveNotebookTo(notes, scene, contact), edit: (id: string) => void editNotebook(id), move: (notes: NotebookSummary[]) => setMovingNotes(notes), recycle: (note: NotebookSummary) => requestNotebookDelete(note),
+    recycleMany: (notes: NotebookSummary[]) => requestNotebookDelete(notes),
     trashCount: notebooks.trashItems.length, openTrash, manageDisabled };
-  const importInvalid = busy || !!storageError || !role || !parsed.length || names.length > 2 || names.includes("未分配") || (!names.includes(role) && role !== "__self_absent__");
+  const importInvalid = busy || importModelSaving || !!storageError || !role || !parsed.length || names.length > 2 || names.includes("未分配") || (!names.includes(role) && role !== "__self_absent__");
   function menuAction(action: () => void) { closeMenu(); action(); }
   const chosen = messages.find((m) => m.id === detail),
     result = detail ? a.lines[detail] : undefined;
   return (
     <main className={`app${isDesktop ? " desktop-app" : ""}${reading.expanded ? " is-chat-reading" : ""}`}>
       <div ref={workspace} className="workspace">
-        <section className={`notebook${messages.length ? '' : ' is-empty'}`} aria-label="对话分析">
+        <section ref={notebookFrame} className={`notebook${messages.length ? '' : ' is-empty'}`} aria-label="对话分析">
+          {isDesktop && <SidebarResize container={notebookFrame} />}
           <nav className="chat-rail" aria-label="工作空间工具">
             <div className="brand">
               <span className="brand-mark">
@@ -435,7 +484,7 @@ export default function App() {
               <MessageCircle size={18} /> 当前对话
               <span className="nav-count">{messages.length || "01"}</span>
             </button>
-            <button disabled={libraryDisabled} onClick={() => void createNotebook()}><Plus size={18} /> 新建手记，保留旧记录</button>
+            <button disabled={libraryDisabled} onClick={() => void createNotebook()}><Plus size={18} /> 新建手记</button>
             <ConversationFolders compact items={notebooks.items} activeId={notebooks.active?.id} disabled={libraryDisabled}
               {...folderActions}
               select={(id) => void selectNotebook(id)} create={() => void createNotebook()} />
@@ -491,8 +540,6 @@ export default function App() {
             </button>
             <div className="breadcrumb">
               <NotebookPen size={17} />
-              <span>{isMobile ? "手机工作空间" : "私人工作空间"}</span>
-              <ChevronRight size={13} />
               <strong>对话手记</strong>
             </div>
             <div className="header-tools">
@@ -546,25 +593,25 @@ export default function App() {
               </h1>
               <p>
                 {messages.length
-                  ? `${messages.length.toLocaleString()} 条记录 · 保留原话，结合上下文阅读`
+                  ? `${messages.length.toLocaleString()} 条消息`
                   : "从日常聊天到工作沟通，看见情绪、表达和下一步。"}
               </p>
               <div className="document-meta">
                 <label className="scene-control">
                   <span>分析场景</span>
-                  <select
+                  <ToggleSelect
                     className="scene-select"
                     aria-label="分析场景"
                     value={relation}
                     disabled={!ready || switching || !!storageError}
-                    onChange={(e) => { setNotice(""); void changeRelation(e.target.value as Relation); }}
+                    onChange={value => { setNotice(""); void changeRelation(value as Relation); }}
                   >
                     {Object.entries(RELATIONS).map(([key, label]) => (
                       <option key={key} value={key}>
                         {label}
                       </option>
                     ))}
-                  </select>
+                  </ToggleSelect>
                 </label>
                 {isNative && <ModelSelector status={apiInfo} disabled={busy || !ready} changed={setApiInfo}
                   notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
@@ -572,7 +619,7 @@ export default function App() {
                   <ShieldCheck size={13} />
                   {storageError ? "保存异常" : "仅在本机保存"}
                 </span>
-                <button className="text-button organize-notebook" disabled={manageDisabled} onClick={() => void editNotebook()}><Pencil size={13} /> 整理手记</button>
+                <IconButton label="整理手记" className="organize-notebook" disabled={manageDisabled} onClick={() => void editNotebook()}><Pencil size={18} /></IconButton>
               </div>
             </div>
             <button
@@ -692,109 +739,10 @@ export default function App() {
                       id={`message-${m.id}`}
                       className={`message ${m.sender}`}
                     >
-                      {(i === 0 || m.timestamp !== messages[i - 1].timestamp) &&
-                        m.timestamp && (
-                          <div className="timestamp">
-                            {m.timestamp.replace(/^\d{4}年/, "")}
-                          </div>
-                        )}
-                      <div className="message-row">
-                        <div
-                          className={`avatar ${m.sender === "self" ? "mine" : ""}`}
-                        >
-                          {(m.sender === "self" ? self : other).slice(0, 1)}
-                        </div>
-                        <div className="message-content">
-                          <div className="bubble">{m.text}</div>
-                          {m.kind === "text" && (
-                            <div className={`message-tags ${m.sender}`}>
-                              {r?.skipped ? (
-                                <span className="pending-tag">{r.skipped}</span>
-                              ) : m.sender === "other" ? (
-                                <>
-                                  <div className="analysis-row emotion-row">
-                                    <span className="analysis-row-label">
-                                      情绪
-                                    </span>
-                                    <div className="analysis-chips">{r?.emotions ? (
-                                      topEmotions(r.emotions).map((emotion) => (
-                                        <button
-                                          key={emotion.key}
-                                          className={`emotion-tag emotion-${emotion.key}`}
-                                          onClick={() => setDetail(m.id)}
-                                          aria-label={`${emotion.label} ${emotion.percent}，查看情绪分析：${m.text}`}
-                                        >
-                                          <span>{emotion.label}</span>
-                                          <b>{emotion.percent}</b>
-                                        </button>
-                                      ))
-                                    ) : (
-                                      <button
-                                        className="pending-tag"
-                                        disabled={busy}
-                                        onClick={() =>
-                                          a.run(messages, relation)
-                                        }
-                                      >
-                                        {busy ? "分析中" : "分析情绪"}
-                                      </button>
-                                    )}</div>
-                                  </div>
-                                  <div className="analysis-row intent-row">
-                                    <span className="analysis-row-label">
-                                      意图
-                                    </span>
-                                    <div className="analysis-chips">{r?.intents ? (
-                                      topIntents(r.intents).map((intent) => (
-                                        <button
-                                          key={intent.key}
-                                          className="intent-tag"
-                                          onClick={() => setDetail(m.id)}
-                                          aria-label={`${intent.label} ${intent.percent}，查看意图分析：${m.text}`}
-                                        >
-                                          <span>{intent.label}</span>
-                                          <b>{intent.percent}</b>
-                                        </button>
-                                      ))
-                                    ) : (
-                                      <button
-                                        className="pending-tag"
-                                        disabled={busy}
-                                        onClick={() =>
-                                          a.run(messages, relation)
-                                        }
-                                      >
-                                        {busy ? "分析中" : "分析意图"}
-                                      </button>
-                                    )}</div>
-                                  </div>
-                                </>
-                              ) : r ? (
-                                <button
-                                  className="reply-tag"
-                                  onClick={() => setDetail(m.id)}
-                                  aria-label={`查看回复评价：${m.text}`}
-                                >
-                                  <span>回复评级：</span>
-                                  <b>
-                                    {replyRating(r.score.value)?.label ??
-                                      "待判断"}
-                                  </b>
-                                </button>
-                              ) : (
-                                <button
-                                  className="pending-tag"
-                                  disabled={busy}
-                                  onClick={() => a.run(messages, relation)}
-                                >
-                                  {busy ? "分析中" : "评价回复"}
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <button className="icon message-delete danger" aria-label={`删除第 ${i + 1} 条消息`} data-tooltip="删除这条聊天消息" disabled={manageDisabled} onClick={() => setMessageDelete(m)}><Trash2 size={15} strokeWidth={1.8} /></button>
-                      </div>
+                      <ChatMessage message={m} result={r} self={self} other={other}
+                        showTime={i === 0 || m.timestamp !== messages[i - 1].timestamp} busy={busy}
+                        detail={() => setDetail(m.id)} analyze={() => a.run(messages, relation)}
+                        trailing={<button className="icon message-delete danger" aria-label={`删除第 ${i + 1} 条消息`} data-tooltip="删除这条聊天消息" disabled={manageDisabled} onClick={() => setMessageDelete(m)}><Trash2 size={15} strokeWidth={1.8} /></button>} />
                     </div>
                   );
                 })}
@@ -841,19 +789,8 @@ export default function App() {
                   if (file) void importFile(file);
                 }}
               />
-              <button
-                className="text-button"
-                disabled={!ready || busy}
-                onClick={() => fileInput.current?.click()}
-              >
-                <Upload size={15} /> 导入文本文件
-              </button>
-              <button
-                className="text-button"
-                onClick={() => setDetail("formats")}
-              >
-                查看支持格式
-              </button>
+              <IconButton label="导入文本文件" disabled={!ready || busy} onClick={() => fileInput.current?.click()}><Upload size={18} /></IconButton>
+              <IconButton label="查看支持格式" onClick={() => setDetail("formats")}><FileText size={18} /></IconButton>
             </div>
             <textarea
               aria-label="粘贴聊天记录"
@@ -880,50 +817,24 @@ export default function App() {
             />
             <div className="composer-bottom">
               <div className="composer-feedback">
-                <span role="status">{storageError || notice || notebooks.workspaceNotice}</span>{" "}
-                {storageError && notebooks.active && <button className="text-button" onClick={() => void notebooks.retrySave()}>重试保存</button>}
-                <div className="analysis-status" aria-live="polite">
-                  {busy ? (
-                    <>
-                      <span className="working" />
-                      正在分析 {a.progress.done}/{a.progress.total}
-                      <button onClick={a.cancel}>停止</button>
-                    </>
-                  ) : a.status === "error" ? (
-                    <>
-                      <span>分析未完成</span>
-                      <button onClick={() => a.run(messages, relation)}>
-                        <RotateCcw size={14} />
-                        重试
-                      </button>
-                    </>
-                  ) : a.status === "complete" ? (
-                    <span className="completed">
-                      <Check size={14} />
-                      分析完成
-                      <button onClick={() => setDetail("overview")}>
-                        查看解读
-                      </button>
-                    </span>
-                  ) : messages.length ? (
-                    <>
-                      <span>分析已暂停</span>
-                      <button onClick={() => a.run(messages, relation)}>
-                        继续分析
-                      </button>
-                    </>
-                  ) : null}
+                <span role="status">{storageError || notice || notebooks.workspaceNotice}</span>
+                <div className="composer-actions">
+                  {storageError && notebooks.active && <IconButton label="重试保存" onClick={() => void notebooks.retrySave()}><RotateCcw size={18} /></IconButton>}
+                  <div className="analysis-status" aria-live="polite">
+                    {busy ? <><span className="working" /><span>{a.progress.done}/{a.progress.total}</span><IconButton label="停止分析" onClick={a.cancel}><Square size={17} /></IconButton></>
+                      : a.status === "error" ? <><CircleAlert size={18} aria-label="分析未完成" /><IconButton label="重试分析" onClick={() => a.run(messages, relation)}><RotateCcw size={18} /></IconButton></>
+                      : a.status === "complete" ? <span className="completed" aria-label="分析完成" data-tooltip="分析完成"><Check size={18} /><IconButton label="查看解读" onClick={() => setDetail("overview")}><Sparkles size={18} /></IconButton></span>
+                      : messages.length ? <IconButton label="继续分析" onClick={() => a.run(messages, relation)}><Sparkles size={18} /></IconButton> : null}
+                  </div>
+                  {!!messages.length && <IconButton label="分享片段" className="share-entry" disabled={busy} onClick={() => setShareSource({ title: notebooks.active?.title || "对话片段", conversation: notebooks.snapshot() })}><Share2 size={18} /></IconButton>}
+                  {a.status === 'complete' && apiInfo?.configured && !sameAnalysisModel(a.analysisIdentity, { provider: apiInfo.provider ?? '', model: apiInfo.model ?? '' }) &&
+                    <IconButton label={`用当前模型重新分析（已保存：${a.analysisIdentity?.model || '未记录模型'}；当前：${apiInfo.model}）`} disabled={busy} onClick={() => a.run(messages, relation)}><RotateCcw size={18} /></IconButton>}
+                  {a.analysisUsage && <IconButton label={a.usageRestored ? '上次分析用量' : '本次分析用量'} onClick={() => setUsageOpen('current')}><BarChart3 size={18} /></IconButton>}
+                  {a.failedAnalysisUsage && a.failedAnalysisUsage.run_id !== a.analysisUsage?.run_id && <IconButton label="上次未完成用量" onClick={() => setUsageOpen('failed')}><History size={18} /></IconButton>}
                 </div>
-                {a.error && <span className="error">{a.error}</span>}
+                {a.error && <span className="error" role="alert">{a.error}</span>}
               </div>
-              <button
-                className="send"
-                disabled={!input.trim() || busy || !!storageError || !ready}
-                onClick={() => prepare(input)}
-              >
-                <Sparkles size={15} />
-                分析聊天
-              </button>
+              <button type="button" className="send" disabled={!input.trim() || busy || !!storageError || !ready} onClick={() => prepare(input)}><Sparkles size={19} /><span>开始分析</span></button>
             </div>
           </div>
         </section>
@@ -952,20 +863,23 @@ export default function App() {
         <button onClick={() => menuAction(() => setOnboarding(true))}><BookOpen size={19} /> 使用引导</button>
       </MobileDrawer>
       {importing && (
-        <Modal title="确认聊天里的你" close={() => setImporting(false)}>
+        <Modal title="确认聊天里的你" close={() => setImporting(false)} suspended={settings}>
           <label className="field">
             本次分析场景
-            <select
+            <ToggleSelect
+              aria-label="本次分析场景"
               value={importScene}
-              onChange={(e) => setImportScene(e.target.value as Relation)}
+              onChange={value => setImportScene(value as Relation)}
             >
               {Object.entries(RELATIONS).map(([key, label]) => (
                 <option key={key} value={key}>
                   {label}
                 </option>
               ))}
-            </select>
+            </ToggleSelect>
           </label>
+          {isNative && <ModelSelector field status={apiInfo} disabled={busy} changed={setApiInfo} pendingChanged={setImportModelSaving}
+            notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
           <div className="role-options">
             {names
               .filter((n) => n !== "未分配")
@@ -990,12 +904,13 @@ export default function App() {
             )}
           </div>
           <label className="field">保存到
-            <select aria-label="导入保存方式" value={canAppend ? importTarget : "new"} onChange={(e) => setImportTarget(e.target.value as "new" | "append")}>
-              <option value="new">新建独立手记（保留原记录）</option>
+            <ToggleSelect aria-label="导入保存方式" value={effectiveImportTarget} onChange={value => setImportTarget(value as "current" | "new" | "append")}>
+              {canFillCurrent && <option value="current">填入当前空手记</option>}
+              <option value="new">新建手记</option>
               {canAppend && <option value="append">追加到当前手记</option>}
-            </select>
+            </ToggleSelect>
           </label>
-          {(importTarget === "new" || !canAppend) && <label className="field">手记名称
+          {effectiveImportTarget !== "append" && <label className="field">手记名称
             <input aria-label="导入手记名称" maxLength={100} value={importTitle} placeholder="留空则按聊天对象命名" onChange={(e) => setImportTitle(e.target.value)} />
           </label>}
           <label className="field">
@@ -1020,8 +935,8 @@ export default function App() {
           >
             开始分析
           </button>
-          <button className="secondary" disabled={importInvalid} onClick={() => void confirmImport(false)}>只保存记录，暂不分析</button>
-          <p className="folder-help">不同聊天对象会保存为独立手记；旧记录和分析保留在对话文件夹中。只有点击开始分析才会调用模型。</p>
+          <button className="secondary" disabled={importInvalid} onClick={() => void confirmImport(false)}>只保存</button>
+          <p className="folder-help">只保存不消耗额度。已有手记保留。</p>
         </Modal>
       )}
       {ready && onboarding && (
@@ -1045,20 +960,21 @@ export default function App() {
           )}
           <label className="field">
             分析场景
-            <select
+            <ToggleSelect
+              aria-label="设置分析场景"
               value={relation}
               disabled={!ready || switching || !!storageError}
-              onChange={(e) => { setNotice(""); void changeRelation(e.target.value as Relation); }}
+              onChange={value => { setNotice(""); void changeRelation(value as Relation); }}
             >
               {Object.entries(RELATIONS).map(([k, v]) => (
                 <option value={k} key={k}>
                   {v}
                 </option>
               ))}
-            </select>
+            </ToggleSelect>
           </label>
           <p>
-            各场景的分析分别保存。切回已分析且原文未变的场景会直接恢复；新场景需要点击继续分析，才消耗 API 额度。
+            各场景分别保存分析；切回原场景可直接恢复。
           </p>
           <button
             className="secondary"
@@ -1092,17 +1008,21 @@ export default function App() {
           <p>
             已保存 {messages.length.toLocaleString()} 条聊天。记录保存在
             {isMobile ? "这部手机" : isDesktop ? "这台电脑的应用中" : "本机浏览器"}
-            ，重新打开后可继续；分析时只发送所需片段给模型服务。整份手记删除后进入回收站，可以恢复。
+            ；分析片段会发送给所选模型。
           </p>
-          <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>重新查看使用引导</button>
-          <button className="secondary update-entry" aria-label={updates.hasUpdate ? "版本与更新 / 下载安装，有新版本" : "版本与更新 / 下载安装"} onClick={() => { setSettings(false); setUpdatesOpen(true); }}>
+          <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>使用引导</button>
+          <button className="secondary update-entry" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} onClick={() => { setSettings(false); setUpdatesOpen(true); }}>
             <span className="update-icon"><Download size={18} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
-            版本与更新 / 下载安装
+            版本与更新
           </button>
-          <button className="secondary" disabled={libraryDisabled} onClick={() => { setSettings(false); setLibraryOpen(true); }}>打开对话文件夹</button>
+          <button className="secondary" disabled={libraryDisabled} onClick={() => { setSettings(false); setLibraryOpen(true); }}>对话文件夹</button>
         </Modal>
       )}
       {updatesOpen && <Modal title="版本与更新" close={() => setUpdatesOpen(false)}><UpdatesPage updates={updates} /></Modal>}
+      {usageOpen && <Modal title={usageOpen === 'failed' ? '上次未完成用量' : a.usageRestored ? '上次分析用量' : '本次分析用量'} close={() => setUsageOpen(false)}>
+        {usageOpen === 'failed' && <p>最近未完成分析的用量，单独统计。</p>}
+        <AnalysisUsage usage={usageOpen === 'failed' ? a.failedAnalysisUsage : a.analysisUsage} restored={usageOpen === 'failed' || a.usageRestored} />
+      </Modal>}
       {appearanceOpen && <Modal title="外观模式" close={() => setAppearanceOpen(false)}><AppearanceSettings appearance={appearance} /></Modal>}
       {updatePrompt && <Modal title="发现新版本" close={updates.snooze}>
         <p>对话手记 v{updates.result?.version} 已发布。</p>
@@ -1115,39 +1035,39 @@ export default function App() {
         <UpdateDownloads />
         <button className="text-button" onClick={updates.dismiss}>此版本不再提醒</button>
       </Modal>}
-      {notebookDelete && <Modal title={notebookDelete.permanent ? "彻底删除手记？" : "删除手记？"} close={() => setNotebookDelete(null)}>
-        <p>「{notebookDelete.note.title}」共 {notebookDelete.note.count} 条聊天。
-          {notebookDelete.permanent ? "将永久删除原文、分析和草稿，无法恢复。" : "将移入回收站，原文、分析和草稿仍可恢复。"}其他手记不会受影响。</p>
-        <button className="primary danger" disabled={manageDisabled} onClick={() => void confirmNotebookDelete()}>{notebookDelete.permanent ? "确认彻底删除" : "移入回收站"}</button>
-        <button className="secondary" onClick={() => setNotebookDelete(null)}>取消，保留记录</button>
-      </Modal>}
       {messageDelete && <Modal title="删除这条聊天消息？" close={() => setMessageDelete(null)}>
         <blockquote>{messageDelete.text}</blockquote>
-        <p>单条消息删除后无法撤销。后续评分和历史记忆可能依赖这句话，因此会清除当前手记所有场景的分析、总览和趋势；其他消息、草稿与其他手记保留。不会自动重新分析或消耗额度。</p>
-        <button className="primary danger" disabled={manageDisabled} onClick={() => void confirmMessageDelete()}>确认删除这条消息</button>
-        <button className="secondary" onClick={() => setMessageDelete(null)}>取消，保留消息</button>
+        <p>删除消息不可撤销，并会清除这份手记各场景的旧分析。其他消息和草稿保留，不自动重算。</p>
+        <button className="primary danger" disabled={manageDisabled} onClick={() => void confirmMessageDelete()}>删除消息</button>
+        <button className="secondary" onClick={() => setMessageDelete(null)}>取消</button>
       </Modal>}
-      {trashOpen && <Modal title="手记回收站" close={() => setTrashOpen(false)}>
-        <p>回收站不会调用模型，也不会自动清空。恢复会保留原文、所有场景分析和草稿；“彻底删除”才不可恢复。</p>
-        {!notebooks.trashItems.length && <p className="folder-empty">回收站为空</p>}
-        <div className="trash-list">{notebooks.trashItems.map((n) => <div className="trash-row" key={n.id}>
-          <div><strong>{n.title}</strong><small>{RELATIONS[n.relation]} · {n.contact} · {n.count} 条</small></div>
-          <button className="text-button" aria-label={`恢复手记：${n.title}`} disabled={manageDisabled} onClick={() => void notebooks.recover(n.id).then((restored) => { if (restored) setNotice("手记已恢复，原文和分析保留，没有调用模型。"); })}><RotateCcw size={15} />恢复</button>
-          <button className="icon danger" aria-label={`彻底删除手记：${n.title}`} data-tooltip="彻底删除" disabled={manageDisabled} onClick={() => requestNotebookDelete(n, true)}><Trash2 size={15} /></button>
-        </div>)}</div>
-        <button className="secondary" onClick={() => { setTrashOpen(false); setLibraryOpen(true); }}>返回对话文件夹</button>
-      </Modal>}
-      {libraryOpen && <Modal title="对话文件夹" close={() => setLibraryOpen(false)}>
+      {libraryOpen && <Modal title="对话文件夹" close={() => setLibraryOpen(false)} suspended={trashOpen || !!notebookDelete || !!movingNotes}>
         <ConversationFolders items={notebooks.items} activeId={notebooks.active?.id} disabled={libraryDisabled}
           {...folderActions}
           select={(id) => void selectNotebook(id)} create={() => void createNotebook()} />
       </Modal>}
+      {movingNotes && <Modal title="移动手记" close={() => setMovingNotes(null)}>
+        <MoveNotebook notes={movingNotes} items={notebooks.items} disabled={manageDisabled} move={(scene, contact) => void moveNotebooks(scene, contact)} />
+      </Modal>}
+      {shareSource && <ShareDialog ref={sharePreview} source={shareSource} close={() => setShareSource(null)} />}
+      {trashOpen && <Modal title="手记回收站" close={() => setTrashOpen(false)} suspended={!!notebookDelete}>
+        <NotebookTrash items={notebooks.trashItems} disabled={manageDisabled} recover={notes => void recoverNotebooks(notes)} purge={notes => requestNotebookDelete(notes, true)} empty={() => requestNotebookDelete(notebooks.trashItems, true, true)} />
+        <IconButton label="返回对话文件夹" onClick={() => { setTrashOpen(false); setLibraryOpen(true); }}><ArrowLeft size={18} /></IconButton>
+      </Modal>}
+      {notebookDelete && <Modal title={notebookDelete.empty ? "清空回收站？" : notebookDelete.permanent ? "彻底删除手记？" : "删除手记？"} close={() => setNotebookDelete(null)}>
+        <p>已选择 {notebookDelete.notes.length} 份手记，共 {notebookDelete.notes.reduce((count, note) => count + note.count, 0)} 条聊天。
+          {notebookDelete.permanent ? "将永久删除原文、分析和草稿，无法恢复。" : "将移入回收站，原文、分析和草稿仍可恢复。"}其他手记不会受影响。</p>
+        <ul className="batch-confirm-list">{notebookDelete.notes.slice(0, 8).map(note => <li key={note.id}>{note.title}</li>)}</ul>
+        {notebookDelete.notes.length > 8 && <p>另有 {notebookDelete.notes.length - 8} 份已选手记。</p>}
+        <button className="primary danger" disabled={manageDisabled} onClick={() => void confirmNotebookDelete()}>{notebookDelete.empty ? "确认清空" : notebookDelete.permanent ? "确认彻底删除" : "移入回收站"}</button>
+        <button className="secondary" disabled={switching} onClick={() => setNotebookDelete(null)}>取消</button>
+      </Modal>}
       {editingNotebook && <Modal title="整理当前手记" close={() => setEditingNotebook(false)}>
         <label className="field">手记名称<input aria-label="手记名称" maxLength={100} value={editTitle} onChange={(e) => setEditTitle(e.target.value)} /></label>
         <label className="field">聊天对象分类<input aria-label="聊天对象分类" maxLength={80} value={editContact} onChange={(e) => setEditContact(e.target.value)} /></label>
-        <label className="field">场景分类<select aria-label="手记场景分类" value={editScene} onChange={(e) => setEditScene(e.target.value as Relation)}>{Object.entries(RELATIONS).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</select></label>
-        <p>归入「{RELATIONS[editScene]} → {editContact || other}」。修改名称不改原文和分析；更换场景保留旧场景结果，不自动分析。</p>
-        <button className="primary" disabled={manageDisabled || !editTitle.trim() || !editContact.trim()} onClick={() => void saveNotebookEdit()}>保存名称与分类</button>
+        <label className="field">分析场景<ToggleSelect aria-label="手记场景分类" value={editScene} onChange={value => setEditScene(value as Relation)}>{Object.entries(RELATIONS).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</ToggleSelect></label>
+        <p>分析场景：{RELATIONS[editScene]}。换场景会保留旧结果；调整文件夹请使用“移动”。</p>
+        <button className="primary" disabled={manageDisabled || !editTitle.trim() || !editContact.trim()} onClick={() => void saveNotebookEdit()}>保存</button>
       </Modal>}
       {detail && detail !== "clear" && (
         <Modal
@@ -1171,7 +1091,7 @@ export default function App() {
               <p>
                 {romantic
                   ? "0—100 是当前聊天的好感信号评分，不是对方喜欢你的概率。"
-                  : "0—100 是当前对话中回应、理解、尊重、支持、清晰表达和行动跟进的综合评分，不代表真实心理、亲密程度或合作成功率。"}
+                  : "0—100 表示当前沟通状态，不代表真实心理或合作成功率。"}
               </p>
               <p>
                 按「{RELATIONS[relation]}
@@ -1242,7 +1162,7 @@ export default function App() {
               <p>QQ：昵称与时间在一行、正文在下一行的复制记录。</p>
               <p>WhatsApp：导出的 .txt 文本，可直接导入文件或复制粘贴。</p>
               <p>
-                其他软件、邮件往来或访谈文字：整理为下面的双人对话格式，支持中文、英文昵称和多行正文。
+                其他记录可整理为以下双人对话格式：
               </p>
               <pre className="format-example">
                 {
@@ -1251,7 +1171,7 @@ export default function App() {
               </pre>
               <p>
                 可导入 UTF-8 的 .txt、.md 和 .log
-                文件。当前分析对象是两人的文字对话，群聊需先整理出两人的相关交流；图片、语音和聊天数据库需要先转换成文字。
+                文件。群聊请整理为双人对话；图片和语音需先转成文字。
               </p>
             </>
           ) : detail === "action" ? (
@@ -1271,8 +1191,7 @@ export default function App() {
                 <span>/100</span>
               </div>
               <p>
-                已完成分析的我方回复平均分。Jev
-                根据发出时的前文评价表达质量，再按固定分数区间显示评级。
+                我方回复的平均分，依据发出时的前文评价。
               </p>
               <div className="reply-guide">
                 {REPLY_RATINGS.map((v) => (
@@ -1332,8 +1251,7 @@ export default function App() {
                     {!result?.intents && <p>意图尚未分析。</p>}
                   </div>
                   <p>
-                    两行分别展示主要情绪与主要沟通意图的候选解读，不代表测量真实内心。每行最多显示前三项，保留原始概率，不重新凑成
-                    100%。
+                    候选解读仅供参考。前三项保留原始概率，不合并为 100%。
                   </p>
                 </>
               ) : (

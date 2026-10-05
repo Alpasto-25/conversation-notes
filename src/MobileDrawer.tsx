@@ -18,6 +18,7 @@ export function MobileDrawer({ ref, background, trigger, children, onOpenChange 
   const [small, setSmall] = useState(() => window.matchMedia("(max-width: 800px)").matches);
   const [reduce, setReduce] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [present, setPresent] = useState(false);
+  const [togglePosition, setTogglePosition] = useState({ left: 16, top: 4, width: 44, height: 44 });
   useEffect(() => { onOpenChange?.(present); }, [present, onOpenChange]);
   const root = useRef<HTMLDivElement>(null), panel = useRef<HTMLDivElement>(null), shade = useRef<HTMLDivElement>(null);
   const animation = useRef<gsap.core.Timeline | null>(null);
@@ -63,8 +64,10 @@ export function MobileDrawer({ ref, background, trigger, children, onOpenChange 
 
   useLayoutEffect(() => {
     if (!present || !small) return;
-    const workspace = background.current, drawer = panel.current;
+    const workspace = background.current, drawer = root.current;
     if (!workspace || !drawer) return;
+    const bounds = trigger.current?.getBoundingClientRect();
+    if (bounds) setTogglePosition({ left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height });
     drawer.querySelector<HTMLButtonElement>("button")?.focus({ preventScroll: true });
     const unlock = lockOverlayBackground(workspace);
     const keydown = (event: KeyboardEvent) => {
@@ -91,12 +94,12 @@ export function MobileDrawer({ ref, background, trigger, children, onOpenChange 
   }, [present, small, background, trigger, close]);
 
   return createPortal(
-    <div ref={root} className="mobile-drawer-layer" hidden={!present || !small}>
+    <div ref={root} className="mobile-drawer-layer" hidden={!present || !small} role="dialog" aria-modal="true" aria-label="工作空间菜单" tabIndex={-1}>
       <div ref={shade} className="mobile-drawer-backdrop" aria-hidden="true" onClick={close} />
-      <div ref={panel} id="mobile-workspace-menu" className="mobile-drawer" role="dialog"
-        aria-modal="true" aria-label="工作空间菜单" tabIndex={-1}>
+      <button className="icon mobile-drawer-toggle" aria-label="关闭菜单" aria-expanded={open} style={togglePosition} onClick={() => setOpen(value => !value)}><Menu size={22} /></button>
+      <div ref={panel} id="mobile-workspace-menu" className="mobile-drawer">
         <header className="mobile-drawer-head">
-          <button className="icon" aria-label="关闭菜单" onClick={close}><Menu size={22} /></button>
+          <span className="mobile-drawer-toggle-space" aria-hidden="true" />
           <strong>对话手记</strong>
         </header>
         <nav className="mobile-drawer-nav" aria-label="手机工作空间工具" inert={!open}>{children}</nav>

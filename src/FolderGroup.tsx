@@ -5,8 +5,9 @@ import { useGSAP } from "@gsap/react";
 
 gsap.registerPlugin(useGSAP);
 
-export function FolderGroup({ label, icon, count, open, toggle, children, className = "" }: {
+export function FolderGroup({ label, icon, count, open, toggle, children, className = "", dropScene, dropContact }: {
   label: string; icon: ReactNode; count?: number; open: boolean; toggle: () => void; children: ReactNode; className?: string;
+  dropScene?: string; dropContact?: string;
 }) {
   const root = useRef<HTMLDivElement>(null), content = useRef<HTMLDivElement>(null);
   const currentOpen = useRef(open), previousOpen = useRef(open), id = useId();
@@ -40,7 +41,7 @@ export function FolderGroup({ label, icon, count, open, toggle, children, classN
     previousOpen.current = open; animate(open);
   }, [open, animate]);
   return <div ref={root} className={`folder-group ${className}`}>
-    <button className="folder-toggle" aria-label={`展开或收起：${label}`} aria-expanded={open} aria-controls={id} onClick={toggle}>
+    <button className="folder-toggle" data-drop-scene={dropScene} data-drop-contact={dropContact} aria-label={`展开或收起：${label}`} aria-expanded={open} aria-controls={id} onClick={toggle}>
       <ChevronRight className={`folder-chevron ${open ? "expanded" : ""}`} size={16} strokeWidth={1.8} aria-hidden="true" />
       {icon}<span>{label}</span>{count !== undefined && <small>{count}</small>}
     </button>

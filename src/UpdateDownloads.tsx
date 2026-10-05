@@ -12,12 +12,12 @@ export function UpdateDownloads() {
   }
   return <div className="update-downloads">
     <div className="update-actions">
-      <button className="primary" onClick={() => open(true)}><Download size={16} /> 夸克网盘下载</button>
-      <button className="secondary" onClick={() => open(false)}><ArrowUpRight size={16} /> GitHub 备用下载</button>
+      <button className="primary" onClick={() => open(true)}><Download size={16} /> 夸克下载</button>
+      <button className="secondary" onClick={() => open(false)}><ArrowUpRight size={16} /> 备用下载</button>
     </div>
     {openError && <p className="error" role="alert">{openError}</p>}
-    <p>夸克提取码：<strong className="download-code">{QUARK_EXTRACTION_CODE}</strong>。选择对应系统的安装包，直接覆盖更新，手机请勿先卸载。</p>
-    <p className="release-address">夸克：{QUARK_DOWNLOAD_URL}</p>
-    <p className="release-address">备用：{RELEASES_URL}</p>
+    <p>提取码：<strong className="download-code">{QUARK_EXTRACTION_CODE}</strong> · 覆盖更新，手机勿先卸载。</p>
+    <details open={!!openError}><summary>复制下载链接</summary><p className="release-address">夸克：{QUARK_DOWNLOAD_URL}</p>
+      <p className="release-address">备用：{RELEASES_URL}</p></details>
   </div>;
 }

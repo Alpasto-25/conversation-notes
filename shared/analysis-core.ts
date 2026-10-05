@@ -4,7 +4,7 @@ import { MAX_MESSAGES, MAX_TEXT_CHARS } from "../shared/limits";
 import { INTENTS } from "../shared/intents";
 import { EMOTIONS } from "../shared/labels";
 import { choice, score, noul, type Questions } from "@typesafe-ai/sdk";
-import type { validateResult } from "./provider-contract";
+import { AnalysisFailure, EvaluationFailure, type validateResult } from "./provider-contract";
 import { z } from "zod";
 import {
   MODEL,
@@ -367,7 +367,10 @@ export function buildRequest(input: AnalysisRequest) {
       }
     }
   }
-  return { state, questions, model: MODEL };
+  return { state, questions, model: MODEL, deepseekContext: {
+    commonInstructions: `${guard} 当前场景：${SCENE_GUIDANCE[input.relation]} `,
+    task: input.task, targets: input.targetIds, sourceIds: input.messages.map(m => m.id),
+  } };
 }
 export type Evaluator = (
   payload: ReturnType<typeof buildRequest>,
@@ -382,7 +385,20 @@ export async function analyzeWithEvaluator(
 ): Promise<AnalysisResponse> {
   const start = performance.now();
   const payload = buildRequest(input);
-  const result = await evaluate(payload, signal);
+  try {
+    return await analysisResponse(input, await evaluate(payload, signal), start);
+  } catch (error) {
+    if (!(error instanceof EvaluationFailure)) throw error;
+    // A line is reusable only when every question for that target passed validation.
+    const targetIds = input.task === 'overview' ? [] : input.targetIds.filter(id => {
+      const required = Object.keys(buildRequest({ ...input, targetIds: [id] }).questions);
+      return required.length > 0 && required.every(key => Object.hasOwn(error.result.answers, key));
+    });
+    const partial = targetIds.length ? await analysisResponse({ ...input, targetIds }, error.result, start) : undefined;
+    throw new AnalysisFailure(error, partial);
+  }
+}
+async function analysisResponse(input: AnalysisRequest, result: ReturnType<typeof validateResult>, start: number): Promise<AnalysisResponse> {
   const a = result.answers;
   const output: AnalysisResponse = {
     revision: input.revision,

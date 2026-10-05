@@ -18,7 +18,7 @@ $BuildRoot = if ($TaskRoot -match '[^\x00-\x7F]') {
 if ($BuildRoot -match '[^\x00-\x7F]') { throw 'Android build tools require an ASCII TEMP path.' }
 $SigningRoot = Join-Path $TaskRoot 'work\android-signing'
 $SigningKey = Join-Path $SigningRoot 'notebook-local.jks'
-$ApkPath = Join-Path $TaskRoot 'outputs\conversation-notes-1.1.2.apk'
+$ApkPath = Join-Path $TaskRoot 'outputs\conversation-notes-1.1.3.apk'
 $Adb = Join-Path $SdkRoot 'platform-tools\adb.exe'
 foreach ($RequiredPath in @($AndroidJar, (Join-Path $JavaRoot 'bin\javac.exe'), (Join-Path $BuildTools 'aapt2.exe'))) {
     if (-not (Test-Path -LiteralPath $RequiredPath)) { throw "Missing Android build dependency: $RequiredPath" }

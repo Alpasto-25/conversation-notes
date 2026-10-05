@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { MODEL_OPTIONS, MODEL_DIFFERENCES, defaultModel, supportsModel } from '../shared/models';
+import { ToggleSelect } from './ToggleSelect';
 import type { ModelSelection } from './ModelSelector';
 import { KeyRound, ShieldCheck } from "lucide-react";
 import { BillingNotice, ProviderHelp } from "./ProviderHelp";
@@ -39,7 +40,7 @@ export function MobileSettings({
     try {
       changed(await saveMobileConfig(provider, key.trim(), model));
       setKey("");
-      setFeedback(`配置已加密保存在${isDesktop ? "这台电脑" : "这部手机"}。可以测试连接了。`);
+      setFeedback("配置已在本机加密保存。");
     } catch (error) {
       setFeedbackError(true);
       setFeedback(error instanceof Error ? error.message : "保存失败");
@@ -88,11 +89,11 @@ export function MobileSettings({
       <BillingNotice compact />
       <label className="field">
         服务平台
-        <select
+        <ToggleSelect
           value={provider}
           disabled={busy}
-          onChange={(e) => {
-            const id = e.target.value; setProvider(id); setKey(''); setFeedback('');
+          aria-label="服务平台" onChange={id => {
+            setProvider(id); setKey(''); setFeedback('');
             setModel(status?.profiles?.find(item => item.provider === id)?.model || defaultModel(id));
           }}
         >
@@ -100,12 +101,12 @@ export function MobileSettings({
           <option value="vercel">Vercel AI Gateway</option>
           <option value="openrouter">OpenRouter</option>
           <option value="deepseek">DeepSeek（官方）</option>
-        </select>
+        </ToggleSelect>
       </label>
       <label className="field">模型
-        <select aria-label="服务模型" value={model} disabled={busy} onChange={event => { setModel(event.target.value); setFeedback(''); }}>
+        <ToggleSelect aria-label="服务模型" value={model} disabled={busy} onChange={value => { setModel(value); setFeedback(''); }}>
           {MODEL_OPTIONS.filter(option => option.provider === provider).map(option => <option key={option.model} value={option.model}>{option.label}</option>)}
-        </select>
+        </ToggleSelect>
       </label>
       <p className="model-differences">{MODEL_DIFFERENCES}</p>
       <ProviderHelp provider={provider} expanded={!status?.configured} />
@@ -140,10 +141,10 @@ export function MobileSettings({
           测试连接
         </button>
       </div>
-      <p className="external-page-note">“测试连接”和正式分析均会调用供应商 API，可能消耗额度或产生费用；请确认自己的额度与费率。</p>
+      <p className="external-page-note">测试连接和分析均会消耗供应商额度。</p>
       {isDesktop && (
         <button className="secondary" disabled={busy} onClick={importConfig}>
-          导入旧版 API 配置（.env）
+          导入配置（.env）
         </button>
       )}
       <p className="secure-note">

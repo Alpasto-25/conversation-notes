@@ -2,6 +2,7 @@ package local.conversation.notes;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.ClipData;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.content.pm.ApplicationInfo;
@@ -32,6 +33,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -62,6 +64,9 @@ public final class MainActivity extends Activity {
     private static final String MASTER_KEY = "conversation-notes-config-v1";
     private static final String IMPORT_KEY = "conversation-notes-usb-v1";
     private static final int FILE_PICKER = 410;
+    private static final int EXPORT_PICKER = 411;
+    private String pendingExportId;
+    private ExportData pendingExport;
     private static final String RELEASE_API = "https://api.github.com/repos/Alpasto-25/conversation-notes/releases/latest";
     private static final String RELEASE_PAGE = "https://github.com/Alpasto-25/conversation-notes/releases/latest";
     private static final String QUARK_PAGE = "https://pan.quark.cn/s/7894e2647abc?pwd=LQxA";
@@ -194,6 +199,24 @@ public final class MainActivity extends Activity {
     @Override public void onBackPressed() { handleBack(); }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == EXPORT_PICKER && pendingExportId != null) {
+            final String id=pendingExportId; final ExportData export=pendingExport;
+            pendingExportId=null; pendingExport=null;
+            final Uri uri=result==RESULT_OK && data!=null ? data.getData() : null;
+            workers.execute(() -> {
+                try {
+                    if (uri==null) deliver(id,true,new JSONObject().put("cancelled",true));
+                    else {
+                        if (!"content".equals(uri.getScheme())) throw new Exception("Invalid document");
+                        try (OutputStream stream=getContentResolver().openOutputStream(uri,"wt")) {
+                            if (stream==null) throw new Exception("Document unavailable");
+                            stream.write(export.bytes);
+                        }
+                        deliver(id,true,new JSONObject().put("saved",true));
+                    }
+                } catch (Exception ignored) { exportError(id); }
+            });
+        }
         if (request == FILE_PICKER && fileCallback != null) {
             Uri chosen = result == RESULT_OK && data != null ? data.getData() : null;
             fileCallback.onReceiveValue(chosen != null && "content".equals(chosen.getScheme()) ? new Uri[]{chosen} : null);
@@ -202,6 +225,7 @@ public final class MainActivity extends Activity {
     }
     @Override protected void onDestroy() {
         destroyed = true;
+        pendingExport=null; pendingExportId=null;
         try { if (provisionSocket != null) provisionSocket.close(); } catch (Exception ignored) {}
         for (HttpURLConnection connection : connections.values()) connection.disconnect();
         workers.shutdownNow();
@@ -283,8 +307,8 @@ public final class MainActivity extends Activity {
     }
     private String model(String provider, String selected) throws ApiException {
         String fallback = provider.equals("deepseek") ? "deepseek-flash" : provider.equals("openrouter") ? "typesafe/jev-1.13" : provider.equals("vercel") ? "typesafe-ai/jev" : "jev-1.13.0";
-        if (selected.isEmpty()) return fallback;
-        if (!selected.equals(fallback) && !(provider.equals("deepseek") && selected.equals("deepseek-v4-pro")))
+        if (selected.isEmpty() || provider.equals("deepseek") && selected.equals("deepseek-v4-pro")) return fallback;
+        if (!selected.equals(fallback))
             throw new ApiException(400, "所选模型不属于当前平台，请重新选择。");
         return selected;
     }
@@ -310,7 +334,7 @@ public final class MainActivity extends Activity {
         String provider = config.optString("provider", "typesafe");
         String selectedModel = model(provider, config.optString("model"));
         if (provider.equals("deepseek")) payload = deepseekRequest(payload, selectedModel);
-        else payload.put("model", selectedModel);
+        else payload = new JSONObject().put("state", payload.get("state")).put("questions", payload.get("questions")).put("model", selectedModel);
         byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
         if (body.length > 2000000) throw new ApiException(413, "聊天过长，请缩小范围。");
         for (int attempt = 0; attempt < 2; attempt++) {
@@ -339,7 +363,7 @@ public final class MainActivity extends Activity {
                 }
                 try (InputStream input = connection.getInputStream()) {
                     JSONObject value = new JSONObject(new String(readLimited(input, 4000000, false), StandardCharsets.UTF_8));
-                    return provider.equals("deepseek") ? deepseekResult(value) : value;
+                    return provider.equals("deepseek") ? deepseekResult(value, attempt + 1) : value;
                 }
             } finally { connections.remove(id); connection.disconnect(); }
         }
@@ -351,6 +375,17 @@ public final class MainActivity extends Activity {
         Object state = payload.opt("state");
         if (!((state instanceof String && !((String)state).trim().isEmpty()) || (state instanceof JSONObject && ((JSONObject)state).length() > 0)) || payload.optJSONObject("questions") == null)
             throw new ApiException(400, "分析请求格式不正确，请重试。");
+        if (payload.has("deepseekMessages")) {
+            org.json.JSONArray prepared = payload.optJSONArray("deepseekMessages");
+            if (prepared == null || prepared.length() != 2) throw new ApiException(400, "分析提示词格式不正确。");
+            for (int i = 0; i < prepared.length(); i++) {
+                JSONObject message = prepared.optJSONObject(i);
+                if (message == null || !message.optString("role").equals(i == 0 ? "system" : "user") || message.optString("content").trim().isEmpty())
+                    throw new ApiException(400, "分析提示词格式不正确。");
+            }
+            return new JSONObject().put("model", model).put("stream", false).put("thinking", new JSONObject().put("type", "disabled"))
+                .put("max_tokens", 8192).put("response_format", new JSONObject().put("type", "json_object")).put("messages", prepared);
+        }
         JSONObject questions = payload.getJSONObject("questions"), answerKeys = new JSONObject(), example = new JSONObject();
         java.util.Iterator<String> ids = questions.keys();
         while (ids.hasNext()) {
@@ -368,12 +403,13 @@ public final class MainActivity extends Activity {
         }
         org.json.JSONArray messages = new org.json.JSONArray()
             .put(new JSONObject().put("role", "system").put("content", payload.optBoolean("deepseekRepair") ? DEEPSEEK_REPAIR_INSTRUCTIONS : DEEPSEEK_INSTRUCTIONS))
-            .put(new JSONObject().put("role", "user").put("content", new JSONObject().put("state", state).put("questions", questions).put("answer_keys", answerKeys).put("answer_example", new JSONObject().put("answers", example)).toString()));
+            .put(new JSONObject().put("role", "user").put("content", new JSONObject().put("questions", questions).put("answer_keys", answerKeys).put("answer_example", new JSONObject().put("answers", example)).put("state", state).toString()));
         JSONObject request = new JSONObject().put("model", model).put("stream", false).put("thinking", new JSONObject().put("type", "disabled"))
             .put("max_tokens", 8192).put("messages", messages);
         return request.put("response_format", new JSONObject().put("type", "json_object"));
     }
-    private JSONObject deepseekResult(JSONObject value) throws Exception {
+    private JSONObject deepseekResult(JSONObject value) throws Exception { return deepseekResult(value, 1); }
+    private JSONObject deepseekResult(JSONObject value, int requests) throws Exception {
         org.json.JSONArray choices = value.getJSONArray("choices");
         if (choices.length() != 1 || value.optString("model").isEmpty())
             throw new ApiException(502, "DeepSeek 返回的分析不完整，请重试；已完成的进度保留。");
@@ -389,8 +425,9 @@ public final class MainActivity extends Activity {
         }
         JSONObject usage = value.getJSONObject("usage");
         if (content.trim().isEmpty()) throw new ApiException(502, "DeepSeek 返回的分析不完整，请重试；已完成的进度保留。");
-        return new JSONObject().put("format", "deepseek-weights-v4").put("model", value.getString("model")).put("json", content)
-            .put("usage", new JSONObject().put("input_tokens", usage.get("prompt_tokens")).put("output_tokens", usage.get("completion_tokens")));
+        JSONObject tokens = new JSONObject().put("input_tokens", usage.get("prompt_tokens")).put("output_tokens", usage.get("completion_tokens")).put("requests", requests);
+        for (String name : new String[]{"prompt_cache_hit_tokens", "prompt_cache_miss_tokens"}) if (usage.has(name)) tokens.put(name, usage.get(name));
+        return new JSONObject().put("format", "deepseek-weights-v4").put("model", value.getString("model")).put("requestId", value.optString("id")).put("json", content).put("usage", tokens);
     }
     private String httpMessage(int code, String provider) {
         String name = provider.equals("deepseek") ? "DeepSeek" : provider.equals("typesafe") ? "TypeSafe" : provider.equals("vercel") ? "Vercel AI Gateway" : "OpenRouter";
@@ -444,6 +481,32 @@ public final class MainActivity extends Activity {
                 + JSONObject.quote(id) + "," + ok + "," + value.toString() + ")", null);
         });
     }
+    private void exportError(String id) {
+        try { deliver(id,false,new JSONObject().put("status",502).put("error","导出失败，请检查保存位置后重试。")); } catch (Exception ignored) {}
+    }
+    private void exportNotes(String id,ExportData data) {
+        runOnUiThread(() -> {
+            if (destroyed) return;
+            try {
+                if (data.action.equals("save")) {
+                    if (pendingExportId!=null) throw new Exception("Document picker already open");
+                    Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(data.mime()).putExtra(Intent.EXTRA_TITLE,data.name);
+                    pendingExportId=id; pendingExport=data;
+                    try { startActivityForResult(intent,EXPORT_PICKER); }
+                    catch (Exception error) { pendingExportId=null; pendingExport=null; throw error; }
+                } else {
+                    Intent intent=new Intent(Intent.ACTION_SEND).setType(data.mime());
+                    if (data.format.equals("txt")) intent.putExtra(Intent.EXTRA_TEXT,data.text());
+                    else {
+                        Uri uri=ShareFiles.create(this,data); intent.putExtra(Intent.EXTRA_STREAM,uri);
+                        intent.setClipData(ClipData.newUri(getContentResolver(),"对话片段",uri)); intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    }
+                    startActivity(Intent.createChooser(intent,"分享对话片段"));
+                    deliver(id,true,new JSONObject().put("opened",true));
+                }
+            } catch (Exception ignored) { exportError(id); }
+        });
+    }
     private final class Bridge {
         @JavascriptInterface public void call(String id, String method, String raw) {
             if (destroyed || id == null || !id.matches("[A-Za-z0-9-]{1,64}") || raw == null || raw.length() > 2000000) return;
@@ -452,6 +515,12 @@ public final class MainActivity extends Activity {
                 try {
                     if (cancelled.contains(id)) return;
                     JSONObject input = new JSONObject(raw), result;
+                    if (method.equals("exportNotes")) {
+                        ExportData data;
+                        try { data=ExportData.decode(input.optString("action"),input.optString("format"),input.optString("name"),input.optString("data")); }
+                        catch (Exception ignored) { throw new ApiException(400,"导出内容无效，请重新生成。"); }
+                        exportNotes(id,data); return;
+                    }
                     if (method.equals("setAppearance")) {
                         String preference = input.optString("theme");
                         if (!preference.equals("system") && !preference.equals("light") && !preference.equals("dark")) throw new ApiException(400, "外观模式无效。");
@@ -518,6 +587,7 @@ public final class MainActivity extends Activity {
             });
         }
         @JavascriptInterface public void cancel(String id) {
+            runOnUiThread(() -> { if (id.equals(pendingExportId)) { pendingExportId=null; pendingExport=null; } });
             if (!jobs.contains(id)) return;
             cancelled.add(id);
             HttpURLConnection connection = connections.get(id);

@@ -35,3 +35,9 @@ This fork adds broader communication scenes, import/UI improvements, local Windo
 文件夹动效使用 GSAP 3.15.0 与 @gsap/react 2.1.2，感谢 GreenSock / Webflow 的工作。两者遵循 [GSAP Standard License](https://gsap.com/standard-license)，**并非本项目的 MIT 许可**；打包代码保留各自的版权与许可注释。
 
 Folder animations use GSAP 3.15.0 and @gsap/react 2.1.2 under the GSAP Standard License, not this project's MIT license. Their copyright and license notices are retained in the bundled code. Credit belongs to GreenSock / Webflow.
+
+## 图片导出 / Image export
+
+聊天界面的图片导出使用 html-to-image 1.11.13（MIT），感谢其维护者。原许可随应用保存在 `licenses/html-to-image-LICENSE.txt`。
+
+Chat image export uses html-to-image 1.11.13 under the MIT license. Its license is included with the app at `licenses/html-to-image-LICENSE.txt`.

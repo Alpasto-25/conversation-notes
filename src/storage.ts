@@ -1,7 +1,10 @@
 import type { Message, Relation, LineResult, Overview } from "../shared/types";
 import type { MemoryEvent } from "../shared/memory";
-import { newNotebook, summarizeNotebook, type Notebook, type NotebookSummary } from "./notebooks";
+import type { CachedTarget } from "./analysis-cache";
+import type { AnalysisUsage, AnalysisIdentity } from "../shared/usage";
+import { moveNotebook, newNotebook, summarizeNotebook, type Notebook, type NotebookSummary } from "./notebooks";
 export type Trend = { at: string; value: number | null; count: number };
+export type NotebookBatchAction = "recycle" | "recover" | "purge";
 export type SavedConversation = {
   schema: 1;
   rubric: string;
@@ -15,6 +18,10 @@ export type SavedConversation = {
   trend: Trend[];
   analyzedCount: number;
   completed: boolean;
+  targetCache?: CachedTarget[];
+  analysisUsage?: AnalysisUsage;
+  failedAnalysisUsage?: AnalysisUsage;
+  analysisIdentity?: AnalysisIdentity;
 };
 export function createNotebookStore(factory?: IDBFactory) {
   let connection: Promise<IDBDatabase> | undefined;
@@ -114,6 +121,34 @@ export function createNotebookStore(factory?: IDBFactory) {
         if (!note?.deletedAt) return;
         delete note.deletedAt; notes.put(note);
       };
+    }),
+    batch: (ids: readonly string[], action: NotebookBatchAction) => transaction<void>("readwrite", (tx) => {
+      const selected = new Set(ids), notes = tx.objectStore("notebooks"), workspace = tx.objectStore("workspace");
+      const deletedAt = new Date().toISOString();
+      for (const id of selected) {
+        const req = notes.get(id);
+        req.onsuccess = () => {
+          const note = req.result as Notebook | undefined;
+          if (!note) return;
+          if (action === "recycle" && !note.deletedAt) notes.put({ ...note, deletedAt });
+          else if (action === "recover" && note.deletedAt) { delete note.deletedAt; notes.put(note); }
+          else if (action === "purge" && note.deletedAt) notes.delete(id);
+        };
+      }
+      if (action === "recycle") {
+        const active = workspace.get("activeId");
+        active.onsuccess = () => { if (selected.has(active.result)) workspace.delete("activeId"); };
+      }
+    }),
+    move: (ids: readonly string[], relation: Relation, contact: string) => transaction<void>("readwrite", (tx) => {
+      const notes = tx.objectStore("notebooks");
+      for (const id of new Set(ids)) {
+        const req = notes.get(id);
+        req.onsuccess = () => {
+          const note = req.result as Notebook | undefined;
+          if (note && !note.deletedAt) notes.put(moveNotebook(note, relation, contact));
+        };
+      }
     }),
     close: async () => { await queue.catch(() => {}); if (connection) (await connection).close(); connection = undefined; },
   };

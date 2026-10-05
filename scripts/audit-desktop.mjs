@@ -15,12 +15,13 @@ async function audit(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const file = join(directory, entry.name);
     if (entry.isDirectory()) {
-      if (!["www", "assets"].includes(entry.name)) throw new Error("Unexpected payload directory");
+      if (!["www", "assets"].includes(entry.name) && file !== join(folder, "www", "licenses")) throw new Error("Unexpected payload directory");
       await audit(file);
       continue;
     }
     if (/\.env|dpapi|\.jks|QA|Tests|\.pdb|\.map/i.test(entry.name)) throw new Error("Private or development file in payload");
     const data = await readFile(file);
+    if (directory === join(folder, "www", "licenses") && entry.name !== "html-to-image-LICENSE.txt") throw new Error("Unexpected dependency license file");
     if (secrets.some((secret) => data.includes(Buffer.from(secret)) || data.includes(Buffer.from(secret, "utf16le"))))
       throw new Error("Build blocked: credential detected");
     if (data.includes(Buffer.from("127.0.0.1:3178"))) throw new Error("Build depends on the old desktop server");
@@ -28,6 +29,8 @@ async function audit(directory) {
   }
 }
 await audit(folder);
+assert.deepEqual(await readFile(join(folder, "www", "licenses", "html-to-image-LICENSE.txt")), await readFile(join(root, "public", "licenses", "html-to-image-LICENSE.txt")),
+  "Packaged image export dependency license must be preserved");
 assert.deepEqual(JSON.parse(await readFile(join(folder, "official-links.json"), "utf8")), OFFICIAL_PROVIDER_URLS,
   "Packaged provider links must match the fixed official allowlist");
 const html = await readFile(join(folder, "www", "index.html"), "utf8");

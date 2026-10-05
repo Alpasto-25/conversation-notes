@@ -6,6 +6,7 @@ export type Notebook = {
   id: string;
   title: string;
   contact: string;
+  folderRelation?: Relation;
   createdAt: string;
   updatedAt: string;
   deletedAt?: string;
@@ -29,12 +30,28 @@ export function newNotebook(conversation = emptyConversation(), title = "新手�
     contact: contact.trim().slice(0, 80) || conversation.other, createdAt: at, updatedAt: at,
     draft: "", conversation, scenes: {} };
 }
+export function canFillNotebook(n: Notebook, importedDraft = ""): boolean {
+  const empty = (c: SavedConversation) => !c.messages.length && !Object.keys(c.lines).length && !Object.keys(c.events).length
+    && !c.overview && !c.trend.length && !c.analyzedCount && !c.completed && !c.targetCache?.length
+    && !c.analysisUsage?.requests && !c.failedAnalysisUsage?.requests;
+  return !n.deletedAt && (!n.draft.trim() || n.draft.trim() === importedDraft.trim())
+    && empty(n.conversation) && Object.values(n.scenes).every(empty);
+}
+export function fillNotebook(n: Notebook, conversation: SavedConversation, title: string, contact: string, importedDraft = ""): Notebook {
+  if (!canFillNotebook(n, importedDraft)) throw new Error("当前手记已有内容，请保存为新手记");
+  return { ...n, title: title.trim().slice(0, 100) || n.title, contact: contact.trim().slice(0, 80) || conversation.other,
+    updatedAt: new Date().toISOString(), draft: "", conversation, scenes: {} };
+}
 export function summarizeNotebook(n: Notebook): NotebookSummary {
   return { id: n.id, title: n.title, contact: n.contact, createdAt: n.createdAt, updatedAt: n.updatedAt,
     deletedAt: n.deletedAt,
-    relation: n.conversation.relation, count: n.conversation.messages.length,
+    relation: n.folderRelation ?? n.conversation.relation, count: n.conversation.messages.length,
     analyzed: !!n.conversation.overview || Object.keys(n.conversation.lines).length > 0,
     completed: n.conversation.completed };
+}
+export function moveNotebook(n: Notebook, relation: Relation, contact: string): Notebook {
+  return { ...n, folderRelation: relation, contact: contact.trim().slice(0, 80) || n.contact,
+    updatedAt: new Date().toISOString() };
 }
 export function conversationInScene(n: Notebook, relation: Relation): SavedConversation {
   const current = n.conversation;
@@ -46,7 +63,8 @@ export function conversationInScene(n: Notebook, relation: Relation): SavedConve
       return m.id === next.id && m.sender === next.sender && m.text === next.text
         && m.timestamp === next.timestamp && m.kind === next.kind;
     })) return { ...saved, messages: current.messages };
-  return { ...emptyConversation(relation), messages: current.messages, self: current.self, other: current.other };
+  return { ...emptyConversation(relation), messages: current.messages, self: current.self, other: current.other,
+    ...(saved?.rubric === RUBRIC && saved.targetCache ? { targetCache: saved.targetCache } : {}) };
 }
 export function organizeNotebook(n: Notebook, title: string, contact: string, relation: Relation): Notebook {
   const conversation = relation === n.conversation.relation ? n.conversation : conversationInScene(n, relation);
@@ -58,8 +76,9 @@ export function withoutMessages(n: Notebook, ids: readonly string[]): Notebook {
   const removed = new Set(ids);
   const messages = n.conversation.messages.filter((m) => !removed.has(m.id));
   if (messages.length === n.conversation.messages.length) return n;
-  // Later judgments and memory may depend on the deleted text. Never reuse that context.
+  // Clear displayed judgments; cached targets require an exact effective-context match before reuse.
   return { ...n, updatedAt: new Date().toISOString(), scenes: {}, conversation: {
     ...emptyConversation(n.conversation.relation), messages, self: n.conversation.self, other: n.conversation.other,
+    ...(n.conversation.targetCache ? { targetCache: n.conversation.targetCache.filter(e => !removed.has(e.line.id)) } : {}),
   } };
 }
