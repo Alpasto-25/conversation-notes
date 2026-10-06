@@ -5,6 +5,9 @@ import { NotebookTrash } from "./NotebookTrash";
 import { MoveNotebook } from "./MoveNotebook";
 import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
 import { ChatMessage } from "./ChatMessage";
+import { SemanticDetail } from './SemanticDetail';
+import { SemanticSwitch } from './SemanticSwitch';
+import { analysisMode, type SemanticMode } from '../shared/analysis-mode';
 import { IconButton } from "./IconButton";
 import { dismissNotebookDrag } from "./useNotebookDrag";
 import type { ShareSource } from "./share-content";
@@ -17,9 +20,9 @@ import { useChatReading } from './useChatReading';
 import { TooltipLayer } from "./TooltipLayer";
 import { lockOverlayBackground } from "./overlay-lock";
 import { emptyConversation, type NotebookSummary } from "./notebooks";
-import { INTENTS } from "../shared/intents";
+import { INTENTS, topIntents } from "../shared/intents";
 import { REPLY_RATINGS, replyRating } from "../shared/ratings";
-import { EMOTIONS } from "../shared/labels";
+import { EMOTIONS, topEmotions } from "../shared/labels";
 import {
   useEffect,
   useLayoutEffect,
@@ -55,7 +58,6 @@ import {
   Minimize2,
   Share2,
   BarChart3,
-  History,
   CircleAlert,
   Square,
   ArrowLeft,
@@ -75,8 +77,7 @@ import {
 } from "../shared/types";
 import { exampleForRelation } from "../shared/fixtures";
 import { useAnalysis } from "./useAnalysis";
-import { AnalysisUsage } from "./AnalysisUsage";
-import { sameAnalysisModel } from "../shared/usage";
+import { ConversationUsage } from "./ConversationUsage";
 import { isMobile, isDesktop, isNative, getApiStatus, type ApiStatus } from "./platform";
 import { MobileSettings } from "./MobileSettings";
 import { BillingNotice, ProviderHelp } from "./ProviderHelp";
@@ -85,6 +86,7 @@ import { markOnboardingSeen, shouldShowOnboarding } from "../shared/provider-gui
 import { useUpdates } from "./useUpdates";
 import { UpdatesPage } from "./UpdatesPage";
 import { UpdateDownloads } from "./UpdateDownloads";
+import { UpdateChanges } from "./UpdateChanges";
 import { useAppearance } from "./useAppearance";
 import { AppearanceSettings } from "./AppearanceSettings";
 import { APP_BUILD } from "./platform";
@@ -164,6 +166,17 @@ function Modal({
     </div>
   );
 }
+function AnalysisModeSelector({ mode, change, disabled, field = false, label }: {
+  mode: SemanticMode; change: (mode: SemanticMode) => void; disabled: boolean; field?: boolean; label?: string;
+}) {
+  const name = label || (field ? '分析组合' : '分析方式');
+  return <label className={field ? 'field analysis-mode-control' : 'scene-control model-control'}>
+    <span>{name}</span><ToggleSelect className={field ? '' : 'scene-select model-select'} aria-label={name}
+      value={mode} disabled={disabled} onChange={value => change(value as SemanticMode)}>
+      <option value="deepseek">仅 DeepSeek</option><option value="jev-deepseek">Jev + DeepSeek</option>
+    </ToggleSelect>
+  </label>;
+}
 export default function App() {
   const a = useAnalysis();
   const notebooks = useNotebooks(a);
@@ -172,7 +185,10 @@ export default function App() {
   const updates = useUpdates();
   const appearance = useAppearance();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
-  const [usageOpen, setUsageOpen] = useState<'current' | 'failed' | false>(false);
+  const [usageOpen, setUsageOpen] = useState(false);
+  const [analysisSettingsOpen, setAnalysisSettingsOpen] = useState(false);
+  const [reanalyzeOpen, setReanalyzeOpen] = useState(false);
+  const [pendingImportAnalysis, setPendingImportAnalysis] = useState<{ notebookId: string; messages: Message[]; relation: Relation } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const drawer = useRef<MobileDrawerHandle>(null);
@@ -209,9 +225,11 @@ export default function App() {
     try { markOnboardingSeen(window.localStorage); } catch { /* Keep the guide dismissible. */ }
     setOnboarding(false);
   };
-  const updatePrompt = updates.showReminder && ready && a.status !== "loading" && !switching &&
-    !menuOpen && !onboarding && !appearanceOpen && !updatesOpen && !settings && !importing && !detail &&
-    !libraryOpen && !editingNotebook && !trashOpen && !notebookDelete && !messageDelete && !movingNotes && !shareSource && !overlap;
+  const canShowUpdatePrompt = ready && a.status !== "loading" && !switching &&
+    !menuOpen && !onboarding && !appearanceOpen && !updatesOpen && !settings && !analysisSettingsOpen && !reanalyzeOpen && !pendingImportAnalysis && !importing && !detail &&
+    !libraryOpen && !editingNotebook && !trashOpen && !notebookDelete && !messageDelete && !movingNotes && !shareSource && !overlap && !usageOpen;
+  const installedUpdatePrompt = updates.showInstalledChanges && canShowUpdatePrompt;
+  const updatePrompt = updates.showReminder && !updates.showInstalledChanges && canShowUpdatePrompt;
   useEffect(() => {
     let live = true;
     const refresh = () => {
@@ -230,6 +248,13 @@ export default function App() {
       window.removeEventListener("notebook-config-changed", refresh);
     };
   }, []);
+  // Start from the committed destination notebook, after its restore and page switch finish.
+  useEffect(() => {
+    if (!pendingImportAnalysis || !ready || switching) return;
+    setPendingImportAnalysis(null);
+    if (!storageError && notebooks.active?.id === pendingImportAnalysis.notebookId && messages === pendingImportAnalysis.messages && relation === pendingImportAnalysis.relation)
+      void a.run(messages, relation);
+  }, [pendingImportAnalysis, ready, switching, storageError, notebooks.active?.id, messages, relation]);
   const scroller = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const virtual = useVirtualizer({
@@ -252,8 +277,11 @@ export default function App() {
     window.__notebookBack = () => {
       if (dismissNotebookDrag()) return true;
       if (dismissSelect()) return true;
+      if (installedUpdatePrompt) { updates.acknowledgeInstalledChanges(); return true; }
       if (updatePrompt) { updates.snooze(); return true; }
       if (usageOpen) { setUsageOpen(false); return true; }
+      if (reanalyzeOpen) { setReanalyzeOpen(false); return true; }
+      if (analysisSettingsOpen) { setAnalysisSettingsOpen(false); return true; }
       if (appearanceOpen) { setAppearanceOpen(false); return true; }
       if (messageDelete) { setMessageDelete(null); return true; }
       if (notebookDelete) { setNotebookDelete(null); return true; }
@@ -290,7 +318,7 @@ export default function App() {
     return () => {
       delete window.__notebookBack;
     };
-  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, usageOpen, updatePrompt, updates.snooze, libraryOpen, editingNotebook, trashOpen, notebookDelete, messageDelete, movingNotes, shareSource, closeMenu, reading.expanded, reading.close]);
+  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, usageOpen, analysisSettingsOpen, reanalyzeOpen, updatePrompt, installedUpdatePrompt, updates.acknowledgeInstalledChanges, updates.snooze, libraryOpen, editingNotebook, trashOpen, notebookDelete, messageDelete, movingNotes, shareSource, closeMenu, reading.expanded, reading.close]);
   const busy = a.status === "loading" || switching,
     ov = a.overview,
     value = ov?.affinity.value,
@@ -372,10 +400,7 @@ export default function App() {
     setImporting(true);
   }
   async function confirmImport(analyze = true) {
-    async function moveNotebookTo(notes: NotebookSummary[], scene: Relation, contact: string) {
-    if (await notebooks.move(notes.map(note => note.id), scene, contact)) setNotice("手记已移动");
-  }
-  const names = [...new Set(parsed.map((x) => x.speaker))];
+    const names = [...new Set(parsed.map((x) => x.speaker))];
     const nextOther = names.find((n) => n !== role) || "对方";
     const imported = toMessages(parsed, role);
     if (importTarget === "append" && canAppend) {
@@ -396,10 +421,11 @@ export default function App() {
     if (!note) return;
     setImporting(false);
     setNotice(""); setDetail(null); setOverlap(null);
-    if (analyze) void a.run(imported, importScene);
+    if (analyze) setPendingImportAnalysis({ notebookId: note.id, messages: note.conversation.messages, relation: note.conversation.relation });
   }
   function resetViews() {
     setNotice(""); setSettings(false); setDetail(null); setOverlap(null); setImporting(false); setLibraryOpen(false);
+    setAnalysisSettingsOpen(false); setReanalyzeOpen(false); setPendingImportAnalysis(null);
     stay.current = true;
   }
   async function createNotebook() { if (await notebooks.create()) resetViews(); }
@@ -414,7 +440,7 @@ export default function App() {
   function requestNotebookDelete(note: NotebookSummary | NotebookSummary[], permanent = false, empty = false) {
     const notes = Array.isArray(note) ? note : [note];
     if (!notes.length) return;
-    setSettings(false); setNotebookDelete({ notes, permanent, empty });
+    setSettings(false); setAnalysisSettingsOpen(false); setNotebookDelete({ notes, permanent, empty });
   }
   async function confirmNotebookDelete() {
     if (!notebookDelete) return;
@@ -456,6 +482,9 @@ export default function App() {
   function menuAction(action: () => void) { closeMenu(); action(); }
   const chosen = messages.find((m) => m.id === detail),
     result = detail ? a.lines[detail] : undefined;
+  const analysisSelection = apiInfo ? analysisMode(apiInfo, a.semanticEnabled, a.semanticMode) : null;
+  const primaryAnalysis = analysisSelection?.primary;
+  const selectedMode = analysisSelection?.selectedMode ?? a.semanticMode ?? 'deepseek';
   return (
     <main className={`app${isDesktop ? " desktop-app" : ""}${reading.expanded ? " is-chat-reading" : ""}`}>
       <div ref={workspace} className="workspace">
@@ -513,9 +542,10 @@ export default function App() {
             <button onClick={() => setDetail("formats")}>
               <FileText size={18} /> 支持的格式
             </button>
-            <button aria-label="聊天设置" onClick={() => setSettings(true)}>
+            <button aria-label="聊天设置" onClick={() => setAnalysisSettingsOpen(true)}>
               <Settings2 size={18} /> 分析设置
             </button>
+            <button onClick={() => setSettings(true)}><Settings2 size={18} /> API 配置</button>
             <div className="rail-note">
               <span className="note-eyebrow">A LITTLE MORE UNDERSTANDING</span>
               <p>
@@ -533,7 +563,7 @@ export default function App() {
               </div>
             </div>
           </nav>
-          <header className="chat-head">
+          <header className={`chat-head${messages.length ? ' has-share' : ''}`}>
             <button ref={menuButton} className="icon mobile-menu-toggle" aria-label="打开菜单"
               aria-expanded="false" aria-controls="mobile-workspace-menu" onClick={() => drawer.current?.toggle()}>
               <Menu size={22} />
@@ -558,6 +588,8 @@ export default function App() {
                     ? "API 已配置"
                     : "配置 API"}
               </button>
+              {!!messages.length && <IconButton label="分享片段" className="share-entry" disabled={busy || !ready}
+                onClick={() => setShareSource({ title: notebooks.active?.title || '对话片段', conversation: notebooks.snapshot() })}><Share2 size={18} /></IconButton>}
               <button
                 className="icon"
                 aria-label="新建对话手记"
@@ -570,7 +602,7 @@ export default function App() {
               <button
                 className="icon mobile-secondary"
                 aria-label="更多聊天设置"
-                onClick={() => setSettings(true)}
+                onClick={() => setAnalysisSettingsOpen(true)}
               >
                 <MoreHorizontal size={22} />
               </button>
@@ -613,8 +645,9 @@ export default function App() {
                     ))}
                   </ToggleSelect>
                 </label>
-                {isNative && <ModelSelector status={apiInfo} disabled={busy || !ready} changed={setApiInfo}
-                  notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
+                {a.semanticEnabled ? <AnalysisModeSelector mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !ready || !apiInfo} />
+                  : isNative && <ModelSelector status={apiInfo} disabled={busy || !ready} changed={setApiInfo}
+                    notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
                 <span className="save-badge">
                   <ShieldCheck size={13} />
                   {storageError ? "保存异常" : "仅在本机保存"}
@@ -740,7 +773,7 @@ export default function App() {
                       className={`message ${m.sender}`}
                     >
                       <ChatMessage message={m} result={r} self={self} other={other}
-                        showTime={i === 0 || m.timestamp !== messages[i - 1].timestamp} busy={busy}
+                        showTime={i === 0 || m.timestamp !== messages[i - 1].timestamp} busy={busy} showSemantics={a.semanticEnabled}
                         detail={() => setDetail(m.id)} analyze={() => a.run(messages, relation)}
                         trailing={<button className="icon message-delete danger" aria-label={`删除第 ${i + 1} 条消息`} data-tooltip="删除这条聊天消息" disabled={manageDisabled} onClick={() => setMessageDelete(m)}><Trash2 size={15} strokeWidth={1.8} /></button>} />
                     </div>
@@ -815,25 +848,27 @@ export default function App() {
                   prepare(input);
               }}
             />
-            <div className="composer-bottom">
               <div className="composer-feedback">
                 <span role="status">{storageError || notice || notebooks.workspaceNotice}</span>
+                {(busy || a.status === 'error' || a.status === 'complete') && <div className="analysis-status" aria-live="polite">
+                  {busy ? <><span className="working" /><span>{a.progress.done}/{a.progress.total}</span></>
+                    : a.status === 'error' ? <><CircleAlert size={16} aria-label="分析未完成" /><span>分析未完成</span></>
+                    : <span className="completed" aria-label="分析完成"><Check size={14} />分析完成</span>}
+                </div>}
+                {a.error && <span className="error" role="alert">{a.error}</span>}
+                {a.semanticNotice && <span role="status">{a.semanticNotice}</span>}
+              </div>
+            <div className="composer-bottom">
                 <div className="composer-actions">
                   {storageError && notebooks.active && <IconButton label="重试保存" onClick={() => void notebooks.retrySave()}><RotateCcw size={18} /></IconButton>}
-                  <div className="analysis-status" aria-live="polite">
-                    {busy ? <><span className="working" /><span>{a.progress.done}/{a.progress.total}</span><IconButton label="停止分析" onClick={a.cancel}><Square size={17} /></IconButton></>
-                      : a.status === "error" ? <><CircleAlert size={18} aria-label="分析未完成" /><IconButton label="重试分析" onClick={() => a.run(messages, relation)}><RotateCcw size={18} /></IconButton></>
-                      : a.status === "complete" ? <span className="completed" aria-label="分析完成" data-tooltip="分析完成"><Check size={18} /><IconButton label="查看解读" onClick={() => setDetail("overview")}><Sparkles size={18} /></IconButton></span>
-                      : messages.length ? <IconButton label="继续分析" onClick={() => a.run(messages, relation)}><Sparkles size={18} /></IconButton> : null}
-                  </div>
-                  {!!messages.length && <IconButton label="分享片段" className="share-entry" disabled={busy} onClick={() => setShareSource({ title: notebooks.active?.title || "对话片段", conversation: notebooks.snapshot() })}><Share2 size={18} /></IconButton>}
-                  {a.status === 'complete' && apiInfo?.configured && !sameAnalysisModel(a.analysisIdentity, { provider: apiInfo.provider ?? '', model: apiInfo.model ?? '' }) &&
-                    <IconButton label={`用当前模型重新分析（已保存：${a.analysisIdentity?.model || '未记录模型'}；当前：${apiInfo.model}）`} disabled={busy} onClick={() => a.run(messages, relation)}><RotateCcw size={18} /></IconButton>}
-                  {a.analysisUsage && <IconButton label={a.usageRestored ? '上次分析用量' : '本次分析用量'} onClick={() => setUsageOpen('current')}><BarChart3 size={18} /></IconButton>}
-                  {a.failedAnalysisUsage && a.failedAnalysisUsage.run_id !== a.analysisUsage?.run_id && <IconButton label="上次未完成用量" onClick={() => setUsageOpen('failed')}><History size={18} /></IconButton>}
+                  {busy ? <IconButton label="停止分析" onClick={a.cancel}><Square size={17} /></IconButton>
+                    : !storageError && a.status === 'error' ? <IconButton label="重试分析" onClick={() => a.run(messages, relation)}><RotateCcw size={18} /></IconButton>
+                    : !storageError && a.status !== 'complete' && messages.length ? <IconButton label="继续分析" onClick={() => a.run(messages, relation)}><Sparkles size={18} /></IconButton> : null}
+                  {a.status === 'complete' && !busy && !storageError && !!messages.length && (a.overview || Object.keys(a.lines).length > 0) && primaryAnalysis?.configured &&
+                    <IconButton label="重新分析" disabled={busy || !!storageError || !ready} onClick={() => setReanalyzeOpen(true)}><RotateCcw size={18} /></IconButton>}
+                  {!storageError && a.semanticEnabled && messages.some(m => m.sender === 'other' && a.lines[m.id]?.emotions) && <IconButton label="补充表达方式与潜台词" disabled={busy} onClick={() => void a.supplementOnly(messages, relation)}><MessageCircle size={18} /></IconButton>}
+                  {(a.analysisUsage || a.semanticUsage || a.failedAnalysisUsage) && <IconButton label="分析用量" onClick={() => setUsageOpen(true)}><BarChart3 size={18} /></IconButton>}
                 </div>
-                {a.error && <span className="error" role="alert">{a.error}</span>}
-              </div>
               <button type="button" className="send" disabled={!input.trim() || busy || !!storageError || !ready} onClick={() => prepare(input)}><Sparkles size={19} /><span>开始分析</span></button>
             </div>
           </div>
@@ -855,7 +890,8 @@ export default function App() {
           <span className="update-icon"><Download size={19} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
           版本与更新{updates.hasUpdate && <span className="nav-count">新版本</span>}
         </button>
-        <button onClick={() => menuAction(() => setSettings(true))}><Settings2 size={19} /> 分析与 API 设置
+        <button onClick={() => menuAction(() => setAnalysisSettingsOpen(true))}><Settings2 size={19} /> 分析设置</button>
+        <button onClick={() => menuAction(() => setSettings(true))}><Settings2 size={19} /> API 配置
           <small className={`menu-api-status${apiInfo?.configured ? " configured" : ""}`}>{apiInfo?.configured ? "已配置" : "待配置"}</small>
         </button>
         <button onClick={() => menuAction(() => setDetail("overview"))}><Sparkles size={19} /> 查看分析解读</button>
@@ -878,8 +914,9 @@ export default function App() {
               ))}
             </ToggleSelect>
           </label>
-          {isNative && <ModelSelector field status={apiInfo} disabled={busy} changed={setApiInfo} pendingChanged={setImportModelSaving}
-            notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
+          {a.semanticEnabled ? <AnalysisModeSelector field label="本次分析组合" mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !apiInfo} />
+            : isNative && <ModelSelector field status={apiInfo} disabled={busy} changed={setApiInfo} pendingChanged={setImportModelSaving}
+              notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
           <div className="role-options">
             {names
               .filter((n) => n !== "未分配")
@@ -945,9 +982,15 @@ export default function App() {
         </Modal>
       )}
       {settings && (
-        <Modal title="聊天设置" close={() => setSettings(false)}>
-          <AppearanceSettings appearance={appearance} />
-          {isNative && <MobileSettings status={apiInfo} changed={setApiInfo} selection={settingsSelection} disabled={busy} />}
+        <Modal title="API 配置" close={() => setSettings(false)}>
+          <SemanticSwitch enabled={a.semanticEnabled} change={a.changeSemanticEnabled} disabled={busy} />
+          {a.semanticEnabled && <>
+            <AnalysisModeSelector mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !apiInfo} field />
+            <p>{selectedMode === 'deepseek' ? '基础分析、表达方式判断和潜台词均由 DeepSeek 完成。' : 'Jev 完成判断，DeepSeek 根据判断写潜台词。'} 切换只影响后续分析，已有结果保留。</p>
+            {analysisSelection?.error && <p role="status">{analysisSelection.error}</p>}
+          </>}
+          {isNative && <MobileSettings status={apiInfo} changed={setApiInfo} selection={settingsSelection} disabled={busy}
+            workflow={a.semanticEnabled ? selectedMode : undefined} />}
           {!isNative && (
             <>
             <p className="desktop-api-note">
@@ -956,8 +999,13 @@ export default function App() {
             </p>
             <BillingNotice />
             <ProviderHelp provider={apiInfo?.provider} expanded={!apiInfo?.configured} />
+            <p>开启表达方式与潜台词时，请在 .env 中填写 DEEPSEEK_API_KEY。已有记录可直接补充；片段会发送给参与分析的平台。</p>
             </>
           )}
+        </Modal>
+      )}
+      {analysisSettingsOpen && (
+        <Modal title="分析设置" close={() => setAnalysisSettingsOpen(false)}>
           <label className="field">
             分析场景
             <ToggleSelect
@@ -990,7 +1038,7 @@ export default function App() {
               setMessages(ms);
               a.reset();
               a.run(ms, relation);
-              setSettings(false);
+              setAnalysisSettingsOpen(false);
             }}
           >
             交换双方身份
@@ -1010,24 +1058,33 @@ export default function App() {
             {isMobile ? "这部手机" : isDesktop ? "这台电脑的应用中" : "本机浏览器"}
             ；分析片段会发送给所选模型。
           </p>
-          <button className="secondary" onClick={() => { setSettings(false); setOnboarding(true); }}>使用引导</button>
-          <button className="secondary update-entry" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} onClick={() => { setSettings(false); setUpdatesOpen(true); }}>
-            <span className="update-icon"><Download size={18} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
-            版本与更新
-          </button>
-          <button className="secondary" disabled={libraryDisabled} onClick={() => { setSettings(false); setLibraryOpen(true); }}>对话文件夹</button>
+          <button className="secondary" onClick={() => { setAnalysisSettingsOpen(false); setOnboarding(true); }}>使用引导</button>
         </Modal>
       )}
       {updatesOpen && <Modal title="版本与更新" close={() => setUpdatesOpen(false)}><UpdatesPage updates={updates} /></Modal>}
-      {usageOpen && <Modal title={usageOpen === 'failed' ? '上次未完成用量' : a.usageRestored ? '上次分析用量' : '本次分析用量'} close={() => setUsageOpen(false)}>
-        {usageOpen === 'failed' && <p>最近未完成分析的用量，单独统计。</p>}
-        <AnalysisUsage usage={usageOpen === 'failed' ? a.failedAnalysisUsage : a.analysisUsage} restored={usageOpen === 'failed' || a.usageRestored} />
+      {usageOpen && <Modal title="分析用量" close={() => setUsageOpen(false)}>
+        <ConversationUsage primary={a.analysisUsage} semantic={a.semanticUsage} failed={a.failedAnalysisUsage} primaryRestored={a.usageRestored} semanticRestored={a.semanticUsageRestored} />
+      </Modal>}
+      {reanalyzeOpen && <Modal title="重新分析当前对话" close={() => setReanalyzeOpen(false)}>
+        <p>将使用 {primaryAnalysis?.model || '当前模型'} 重新分析当前场景，聊天原文保留。</p>
+        <p>这会覆盖当前分析结果和用量记录，原结果无法恢复，并会产生新的模型用量。</p>
+        <button className="primary danger" disabled={busy || !!storageError || !primaryAnalysis?.configured} onClick={() => {
+          setReanalyzeOpen(false); setDetail(null); setNotice('');
+          void a.run(messages, relation, true);
+        }}>确认覆盖并重新分析</button>
+        <button className="secondary" onClick={() => setReanalyzeOpen(false)}>取消</button>
       </Modal>}
       {appearanceOpen && <Modal title="外观模式" close={() => setAppearanceOpen(false)}><AppearanceSettings appearance={appearance} /></Modal>}
+      {installedUpdatePrompt && <Modal title="本次更新内容" close={updates.acknowledgeInstalledChanges}>
+        <p>对话手记 v{APP_BUILD.version} 已更新。</p>
+        <UpdateChanges changes={APP_BUILD.changes} />
+        <button className="primary" onClick={updates.acknowledgeInstalledChanges}>知道了</button>
+      </Modal>}
       {updatePrompt && <Modal title="发现新版本" close={updates.snooze}>
         <p>对话手记 v{updates.result?.version} 已发布。</p>
         <p>当前版本 v{APP_BUILD.version}。{updates.result?.message}</p>
-        <p>查看更新说明，下载对应系统的安装包即可更新。应用不会自动下载或安装，现有记录继续保存在本机。</p>
+        <UpdateChanges changes={updates.result?.changes} />
+        <p>下载对应系统的安装包覆盖更新，现有记录保留。</p>
         <div className="update-actions">
           <button className="secondary" onClick={updates.snooze}>稍后再说</button>
           <button className="secondary" onClick={() => { updates.snooze(); setUpdatesOpen(true); }}>查看更新说明</button>
@@ -1100,13 +1157,12 @@ export default function App() {
               {ov && (
                 <p>
                   {relation !== "couple" && (
-                    <>沟通进展：{STAGES[ov.stage] ?? "信息不足"}</>
+                    <>沟通进展：<strong>{STAGES[ov.stage] ?? "信息不足"}</strong></>
                   )}
                   {ov.rapport && (
                     <>
                       {relation !== "couple" && " · "}理解与协调{" "}
-                      {ov.rapport.value ?? "—"}/100（
-                      {statusLabel(ov.rapport)}）
+                      <strong>{ov.rapport.value ?? "—"}/100</strong>
                     </>
                   )}
                 </p>
@@ -1137,7 +1193,7 @@ export default function App() {
                       />
                       <strong>{d.judgment.value}</strong>
                       <small>
-                        占 {d.weight}% · {statusLabel(d.judgment)}
+                        {d.judgment.status !== 'clear' && statusLabel(d.judgment)}
                       </small>
                     </div>
                   ))}
@@ -1145,14 +1201,12 @@ export default function App() {
               )}
               {ov?.boundaryApplied && (
                 <p>
-                  对方表达了明确且仍有效的拒绝边界。综合原分{" "}
-                  {ov.affinityRawValue}，最终好感信号最多显示 25 分。
+                  <strong>对方已明确表达拒绝，请尊重这一边界。</strong>
                 </p>
               )}
-              {ov && (
+              {ov && ov.affinity.status !== 'clear' && (
                 <p>
-                  本轮判断：{statusLabel(ov.affinity)}。综合确定度{" "}
-                  {Math.round(ov.affinity.confidence * 100)}%。
+                  <strong>{statusLabel(ov.affinity)}</strong>
                 </p>
               )}
             </>
@@ -1210,49 +1264,28 @@ export default function App() {
               {chosen?.sender === "other" ? (
                 <>
                   <h3>情绪</h3>
-                  <div className="emotion-distribution">
-                    {Object.entries(result?.emotions || {})
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([key, p]) => (
-                        <div key={key}>
-                          <span>
-                            {EMOTIONS[key as keyof typeof EMOTIONS]?.label ||
-                              key}
-                          </span>
-                          <div className="probability-track">
-                            <i style={{ width: `${p * 100}%` }} />
-                          </div>
-                          <b>
-                            {p > 0 && p < 0.005
-                              ? "<1%"
-                              : `${Math.round(p * 100)}%`}
-                          </b>
+                  <div>
+                    {topEmotions(result?.emotions).filter((item, index) => index === 0 || item.probability >= .1)
+                      .map(emotion => (
+                        <div key={emotion.key} className="intent-detail-item">
+                          <div><strong>{emotion.label}</strong></div>
+                          <p>{EMOTIONS[emotion.key as keyof typeof EMOTIONS].criteria}</p>
                         </div>
                       ))}
+                    {!result?.emotions && <p>情绪尚未分析。</p>}
                   </div>
-                  <h3 className="intent-detail-heading">意图</h3>
+                  <h3 className="intent-detail-heading">{result?.intentVersion ? '表层意图' : '意图（旧版）'}</h3>
                   <div className="intent-distribution">
-                    {Object.entries(result?.intents || {})
-                      .filter(([key, p]) => key in INTENTS && p > 0)
-                      .sort((a, b) => b[1] - a[1])
-                      .map(([key, p]) => (
-                        <div key={key} className="intent-detail-item">
-                          <div>
-                            <strong>
-                              {INTENTS[key as keyof typeof INTENTS].label}
-                            </strong>
-                            <b>
-                              {p < 0.005 ? "<1%" : `${Math.round(p * 100)}%`}
-                            </b>
-                          </div>
-                          <p>{INTENTS[key as keyof typeof INTENTS].criteria}</p>
+                    {topIntents(result?.intents).filter((item, index) => index === 0 || item.probability >= .1)
+                      .map(intent => (
+                        <div key={intent.key} className="intent-detail-item">
+                          <div><strong>{intent.label}</strong></div>
+                          <p>{INTENTS[intent.key as keyof typeof INTENTS].criteria}</p>
                         </div>
                       ))}
                     {!result?.intents && <p>意图尚未分析。</p>}
                   </div>
-                  <p>
-                    候选解读仅供参考。前三项保留原始概率，不合并为 100%。
-                  </p>
+                  {a.semanticEnabled && <SemanticDetail result={result} messages={messages} />}
                 </>
               ) : (
                 <>
@@ -1265,7 +1298,7 @@ export default function App() {
                       "当前语境不足以判断表达质量"}
                   </p>
                   <p>
-                    回复评分 {result?.score.value ?? "—"} / 100 ·{" "}
+                    回复评分 <strong>{result?.score.value ?? "—"} / 100</strong> ·{" "}
                     {result && statusLabel(result.score)}
                   </p>
                 </>

@@ -65,6 +65,32 @@ export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
     ...(a.details || b.details ? { details: [...(a.details ?? []), ...(b.details ?? [])] } : {}) };
 }
 
+// Combine the saved primary and supplemental runs, preserving unknown supplier fields.
+export function uniqueAnalysisUsage(values: (AnalysisUsage | undefined)[]): AnalysisUsage[] {
+  const seen = new Set<string>();
+  const objects = new Set<AnalysisUsage>();
+  return values.filter((value): value is AnalysisUsage => {
+    if (!value || objects.has(value) || (value.run_id && seen.has(value.run_id))) return false;
+    if (value.run_id) seen.add(value.run_id);
+    objects.add(value);
+    return true;
+  });
+}
+export function combineAnalysisUsage(values: (AnalysisUsage | undefined)[]): AnalysisUsage | undefined {
+  const runs = uniqueAnalysisUsage(values);
+  if (!runs.length) return undefined;
+  const totals = runs.reduce<TokenUsage>((sum, value) => addUsage(sum, value),
+    { input_tokens: 0, output_tokens: 0, requests: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 });
+  const models = [...new Set(runs.flatMap(run => run.model?.split(' + ') ?? []))];
+  const starts = runs.flatMap(run => run.started_at ? [run.started_at] : []).sort();
+  const finishes = runs.flatMap(run => run.finished_at ? [run.finished_at] : []).sort();
+  return { ...totals, local_targets: runs.reduce((sum, run) => sum + run.local_targets, 0),
+    elapsed_ms: runs.reduce((sum, run) => sum + run.elapsed_ms, 0),
+    ...(models.length ? { model: models.join(' + ') } : {}),
+    ...(starts.length ? { started_at: starts[0] } : {}),
+    ...(finishes.length === runs.length ? { finished_at: finishes.at(-1) } : {}) };
+}
+
 export type RequestUsageGroup = TokenUsage & { model: string; task: string; prompt_family: string; returns: number; repairs: number; elapsed_ms: number };
 // Group returned usage by model, task and exact system fingerprint, keeping absent supplier fields unknown.
 export function groupRequestUsage(details: RequestUsage[]): RequestUsageGroup[] {

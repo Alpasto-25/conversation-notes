@@ -49,10 +49,17 @@ const resultSchema = z.object({
   }),
 });
 
+export const JEV_TOKEN_BUDGET_ERROR = 'max_tokens_exceeded';
+export function jevBudgetErrorCode(value: unknown) {
+  // TypeSafe's fixed error field only; never copy its message or raw body.
+  return z.object({ detail: z.object({ error_type: z.literal(JEV_TOKEN_BUDGET_ERROR) }) }).safeParse(value).success
+    ? JEV_TOKEN_BUDGET_ERROR : undefined;
+}
 export class ProviderError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly providerCode?: typeof JEV_TOKEN_BUDGET_ERROR,
   ) {
     super(message);
   }
@@ -62,20 +69,29 @@ export class ProviderError extends Error {
 export class EvaluationFailure extends ProviderError {
   constructor(error: unknown, readonly result: ReturnType<typeof validateResult>) {
     super(error instanceof ProviderError ? error.status : 502,
-      error instanceof ProviderError ? error.message : 'DeepSeek 返回处理失败，请重试；已完成的进度保留。');
+      error instanceof ProviderError ? error.message : 'DeepSeek 返回处理失败，请重试；已完成的进度保留。',
+      error instanceof ProviderError ? error.providerCode : undefined);
   }
 }
 export class AnalysisFailure extends ProviderError {
   readonly usage: TokenUsage;
   constructor(error: EvaluationFailure, readonly partial?: AnalysisResponse) {
-    super(error.status, error.message);
+    super(error.status, error.message, error.providerCode);
     this.usage = error.result.usage;
   }
 }
 export function analysisFailureDetails(error: unknown): { usage?: TokenUsage; partial?: AnalysisResponse } {
   return error instanceof AnalysisFailure ? { usage: error.usage, ...(error.partial ? { partial: error.partial } : {}) } : {};
 }
+// A local result may skip the supplier entirely. Its token counts and request details must be empty.
+const localUsageSchema = resultSchema.shape.usage.extend({
+  input_tokens: z.literal(0), output_tokens: z.literal(0), requests: z.literal(0),
+  prompt_cache_hit_tokens: z.literal(0).optional(), prompt_cache_miss_tokens: z.literal(0).optional(),
+  details: z.tuple([]).optional(),
+});
 export function validateReturnedUsage(value: unknown): TokenUsage {
+  const local = localUsageSchema.safeParse(value);
+  if (local.success) return local.data;
   return validateResult({ model: 'usage', answers: {}, usage: value }, {}).usage;
 }
 

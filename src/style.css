@@ -557,6 +557,10 @@ h3 {
 .updates-page .update-state p, .updates-page .update-time { font-size: var(--font-12); }
 .update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .update-actions > button { width: auto; margin: 0; }
+.update-changes { margin: var(--space-4) 0; }
+.update-changes h4 { margin: 0 0 var(--space-2); font-size: var(--font-13); color: var(--text-secondary); }
+.update-changes ul { margin: 0; padding-left: 20px; font-size: var(--font-13); line-height: 1.7; color: var(--text-secondary); }
+.update-changes li + li { margin-top: var(--space-2); }
 .release-address { font-size: var(--font-11); overflow-wrap: anywhere; user-select: text; }
 .download-code { user-select: text; }
 .update-spinner { animation: update-spin 1s linear infinite; }
@@ -904,7 +908,8 @@ h3 {
   align-self: start;
 }
 .emotion-tag,
-.intent-tag {
+.intent-tag,
+.strategy-tag {
   padding: 3px 6px;
   border-radius: var(--radius-sm);
   font-size: var(--font-12);
@@ -920,7 +925,8 @@ h3 {
   color: var(--tag-neutral-text);
 }
 .emotion-tag b,
-.intent-tag b {
+.intent-tag b,
+.strategy-tag b {
   font-size: var(--font-11);
   font-weight: 500;
   opacity: 0.85;
@@ -960,6 +966,36 @@ h3 {
   background: var(--tag-info-surface);
   color: var(--tag-info-text);
 }
+.strategy-tag {
+  display: inline-flex;
+  align-items: center;
+  background: var(--tag-muted-surface);
+  color: var(--text-secondary);
+}
+.subtext-text {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text-subtle);
+  font-size: var(--font-12);
+  line-height: 24px;
+  text-align: left;
+}
+button.subtext-text { display: flex; align-items: flex-start; justify-content: flex-start; cursor: pointer; }
+.subtext-row { align-items: start; }
+.subtext-row .analysis-row-label { align-self: start; white-space: nowrap; }
+.subtext-text { padding: 0; }
+.semantic-empty { color: var(--text-subtle); font-size: var(--font-12); }
+.semantic-explanation { overflow-wrap: anywhere; }
+.semantic-evidence summary { cursor: pointer; color: var(--accent); font-size: var(--font-12); }
+.semantic-switch { margin-bottom: var(--space-4); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.semantic-switch label { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: var(--touch-height); font-size: var(--font-13); }
+.semantic-switch p { margin-top: var(--space-2); color: var(--text-subtle); font-size: var(--font-12); line-height: 1.7; }
+.semantic-switch input[role="switch"] { width: 36px; height: 22px; border-radius: 12px; position: relative; flex: 0 0 auto; }
+.semantic-switch input[role="switch"]::after { content: ""; display: block; position: absolute; inset: 3px auto auto 3px; width: 14px; height: 14px; border: 0; border-radius: 50%; background: var(--text-subtle); mask: none; transform: none; }
+.semantic-switch input[role="switch"]:checked::after { left: 17px; background: white; }
 .reply-tag,
 .pending-tag {
   border-radius: var(--radius-sm);
@@ -1061,7 +1097,7 @@ h3 {
 .composer-bottom {
   display: flex;
   gap: 16px;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
 }
 .composer-feedback {
@@ -1074,6 +1110,8 @@ h3 {
   display: block;
   margin-bottom: 6px;
 }
+.composer-feedback > span[role="status"]:empty { display: none; }
+.composer-feedback > .analysis-status { margin-bottom: var(--space-1); }
 .send {
   background: var(--accent-solid);
   color: var(--on-accent);
@@ -1116,12 +1154,15 @@ h3 {
 .analysis-usage dt, .analysis-usage dd { margin: 0; }
 .analysis-usage dd { font-variant-numeric: tabular-nums; }
 .analysis-usage dd { text-align: right; overflow-wrap: anywhere; }
-.usage-details, .usage-groups { margin-top: var(--space-4); }
-.usage-details summary, .usage-groups summary { color: var(--text-secondary); }
-.usage-table-scroll, .usage-group-scroll { max-width: 100%; overflow-x: auto; margin-top: var(--space-3); }
-.usage-table-scroll table, .usage-group-scroll table { border-collapse: collapse; min-width: 900px; font-size: var(--font-11); }
-.usage-table-scroll th, .usage-table-scroll td, .usage-group-scroll th, .usage-group-scroll td { padding: var(--space-2); text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
-.usage-table-scroll small, .usage-group-scroll small { display: block; margin-top: var(--space-1); overflow-wrap: anywhere; }
+.usage-history { margin-top: var(--space-4); }
+.usage-model { border-top: 1px solid var(--line); padding-top: var(--space-4); margin-top: var(--space-4); }
+.usage-model h4 { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); margin: 0 0 var(--space-3); color: var(--text-secondary); font-size: var(--font-14); }
+.usage-model h4 span { font-weight: 400; font-size: var(--font-12); color: var(--muted); overflow-wrap: anywhere; }
+.usage-model dl { margin-bottom: var(--space-3); }
+.usage-cost { color: var(--text-primary); font-size: var(--font-14); }
+.usage-pricing { margin-top: var(--space-3); }
+.usage-pricing summary { color: var(--text-secondary); }
+.analysis-usage .usage-footnote { margin-top: var(--space-4); color: var(--muted); }
 .analysis-usage p { max-width: 52em; line-height: 1.6; margin: 6px 0; }
 .working {
   width: 6px;
@@ -1411,6 +1452,11 @@ details[open] > :not(summary) { animation: surface-fade var(--motion-normal) var
   align-items: center;
   gap: 8px;
 }
+.model-configuration + .model-configuration {
+  margin-top: var(--space-6);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
 .api-actions {
   display: flex;
   gap: 8px;
@@ -1692,8 +1738,9 @@ details[open] > :not(summary) { animation: surface-fade var(--motion-normal) var
   .provider-links { gap: var(--space-2) var(--space-3); }
   .update-reminder > .icon { min-height: var(--touch-height); width: var(--touch-height); height: var(--touch-height); }
   .update-reminder > button { min-height: var(--touch-height); }
-  .emotion-tag, .intent-tag { min-height: 28px; }
-  .emotion-tag::after, .intent-tag::after { content: ""; position: absolute; inset: -8px 0; }
+  .emotion-tag, .intent-tag, .strategy-tag { min-height: 28px; }
+  .emotion-tag::after, .intent-tag::after, .strategy-tag::after { content: ""; position: absolute; inset: -8px 0; }
+  button.subtext-text { min-height: var(--touch-height); }
   .reply-tag, .pending-tag { min-height: var(--touch-height); }
   .chat-insights button { min-height: 42px; }
   .notebook-actions, .message-delete { opacity: 1; }
@@ -1731,6 +1778,7 @@ details[open] > :not(summary) { animation: surface-fade var(--motion-normal) var
   .chat-head .mobile-menu-toggle {
     display: inline-flex;
   }
+  .chat-head.has-share { grid-template-columns: 88px minmax(0, 1fr) 88px; }
   .chat-head .icon {
     width: 44px;
     height: 44px;
@@ -2086,10 +2134,7 @@ details[open] > :not(summary) { animation: surface-fade var(--motion-normal) var
 .icon.action-icon svg { flex-shrink: 0; }
 .icon.action-icon[aria-pressed="true"] { background: var(--sky); color: var(--accent); }
 .icon.action-icon.danger { color: var(--danger); }
-.composer-feedback { flex: 1; }
-.composer-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-1); }
-.composer-actions .completed { gap: 2px; flex-wrap: nowrap; }
-.composer-actions .completed > svg { margin-inline: var(--space-1); }
+.composer-actions { display: flex; align-items: center; flex: 1; min-width: 0; flex-wrap: nowrap; gap: var(--space-1); }
 .composer-feedback > .error { display: block; margin-top: 6px; }
 .composer .send { min-height: var(--control-height); }
 .batch-toolbar { gap: var(--space-1); }

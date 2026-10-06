@@ -19,7 +19,8 @@ async function audit(directory) {
       await audit(file);
       continue;
     }
-    if (/\.env|dpapi|\.jks|QA|Tests|\.pdb|\.map/i.test(entry.name)) throw new Error("Private or development file in payload");
+    // Vite asset hashes can contain "QA"; reject development file names by extension.
+    if (/(?:^|\.)env(?:\.|$)|\.(?:dpapi|jks|keystore|pdb|map)$|(?:QA|Tests)\.(?:exe|dll)(?:\.config)?$/i.test(entry.name)) throw new Error("Private or development file in payload");
     const data = await readFile(file);
     if (directory === join(folder, "www", "licenses") && entry.name !== "html-to-image-LICENSE.txt") throw new Error("Unexpected dependency license file");
     if (secrets.some((secret) => data.includes(Buffer.from(secret)) || data.includes(Buffer.from(secret, "utf16le"))))

@@ -6,7 +6,7 @@ const root = resolve(import.meta.dirname, '..');
 const out = join(root, 'artifacts', `source-${Date.now()}`, 'crush-monitor');
 await mkdir(out, {recursive:true});
 // Allowlist: never export local docs, credentials, screenshots, runtime logs or git history.
-for (const name of ['src','shared','server','tests','public','android','desktop','docs','README.md','README.en.md','UI_STYLE.md','ACKNOWLEDGEMENTS.md','CHANGELOG.md','SECURITY.md','LICENSE','package.json','package-lock.json','tsconfig.json','vite.config.ts','index.html','.gitignore','.env.example']) {
+for (const name of ['src','shared','server','tests','public','android','desktop','docs','README.md','README.en.md','UI_STYLE.md','ACKNOWLEDGEMENTS.md','CHANGELOG.md','SECURITY.md','LICENSE','package.json','package-lock.json','release-notes.json','tsconfig.json','vite.config.ts','index.html','.gitignore','.env.example']) {
   await cp(join(root,name), join(out,name), {recursive:true});
 }
 await mkdir(join(out,'scripts'));

@@ -262,9 +262,11 @@ public final class MainActivity extends Activity {
         if (!provider.equals("typesafe") && !provider.equals("vercel") && !provider.equals("openrouter") && !provider.equals("deepseek"))
             throw new ApiException(400, "平台只支持 TypeSafe、Vercel、OpenRouter 和 DeepSeek。");
         String key = input.optString("apiKey", "").trim();
+        boolean activate = input.optBoolean("activate", true);
+        if (!activate && !provider.equals("deepseek")) throw new ApiException(400, "补充分析只支持 DeepSeek。");
         JSONObject old;
         try { old = readConfig(); }
-        catch (Exception error) { if (key.isEmpty()) throw error; old = new JSONObject(); }
+        catch (Exception error) { if (key.isEmpty() || !activate) throw error; old = new JSONObject(); }
         JSONObject profiles = profiles(old);
         JSONObject profile = profiles.optJSONObject(provider);
         if (key.isEmpty() && profile != null) key = profile.optString("apiKey");
@@ -276,7 +278,7 @@ public final class MainActivity extends Activity {
         if (key.startsWith("sk-or-") && !provider.equals("openrouter"))
             throw new ApiException(400, "这看起来是 OpenRouter Key，请选择 OpenRouter。");
         profiles.put(provider, new JSONObject().put("apiKey", key).put("model", selectedModel));
-        JSONObject config = new JSONObject().put("provider", provider).put("apiKey", key).put("model", selectedModel).put("profiles", profiles);
+        JSONObject config = activate || old.optString("provider").equals(provider) ? new JSONObject().put("provider", provider).put("apiKey", key).put("model", selectedModel).put("profiles", profiles) : old.put("profiles", profiles);
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, masterKey());
         byte[] ciphertext = cipher.doFinal(config.toString().getBytes(StandardCharsets.UTF_8));
@@ -329,6 +331,20 @@ public final class MainActivity extends Activity {
     private JSONObject evaluate(String id, JSONObject payload) throws Exception {
         takeBudget();
         JSONObject config = readConfig();
+        String purpose = payload.optString("purpose");
+        if (!purpose.isEmpty() && !purpose.equals("semantics") && !purpose.equals("primary") && !purpose.equals("judgment")) throw new ApiException(400, "分析用途不受支持。");
+        if (purpose.equals("primary") || purpose.equals("judgment")) {
+            String selected = payload.optString("provider");
+            if (!selected.equals("typesafe") && !selected.equals("vercel") && !selected.equals("openrouter") && (!selected.equals("deepseek") || purpose.equals("judgment"))) throw new ApiException(400, "分析平台不受支持。");
+            JSONObject profile = profiles(config).optJSONObject(selected);
+            if (profile == null || profile.optString("apiKey").isEmpty()) throw new ApiException(503, "所选模型尚未配置，请先保存对应 Key。");
+            config = new JSONObject().put("provider", selected).put("apiKey", profile.getString("apiKey")).put("model", model(selected, profile.optString("model")));
+        }
+        if (purpose.equals("semantics")) {
+            JSONObject profile = profiles(config).optJSONObject("deepseek");
+            if (profile == null || profile.optString("apiKey").isEmpty()) throw new ApiException(503, "请在聊天设置中单独保存 DeepSeek 配置后补充策略与潜台词。");
+            config = new JSONObject().put("provider", "deepseek").put("apiKey", profile.getString("apiKey")).put("model", model("deepseek", profile.optString("model")));
+        }
         String key = config.optString("apiKey");
         if (key.isEmpty()) throw new ApiException(503, "请先在右上角设置中填写 API Key。");
         String provider = config.optString("provider", "typesafe");
@@ -359,7 +375,14 @@ public final class MainActivity extends Activity {
                     if (attempt == 0 && (code == 429 || code == 503 || code == 529) && seconds >= 0 && seconds <= 3) {
                         connection.disconnect(); Thread.sleep(Math.max(100, (long)(seconds * 1000))); continue;
                     }
-                    throw new ApiException(code >= 400 && code < 600 ? code : 502, httpMessage(code, provider));
+                    String errorCode = null;
+                    if (provider.equals("typesafe") && code == 400) {
+                        try (InputStream input = connection.getErrorStream()) {
+                            if (input != null) errorCode = budgetErrorCode(new JSONObject(new String(readLimited(input, 2000000, false), StandardCharsets.UTF_8)));
+                        } catch (Exception ignored) { /* Unrecognized bodies keep the generic failure. */ }
+                    }
+                    throw new ApiException(code >= 400 && code < 600 ? code : 502,
+                        errorCode == null ? httpMessage(code, provider) : provider + "：当前判断请求过大，请缩小聊天范围后重试。", errorCode);
                 }
                 try (InputStream input = connection.getInputStream()) {
                     JSONObject value = new JSONObject(new String(readLimited(input, 4000000, false), StandardCharsets.UTF_8));
@@ -384,7 +407,7 @@ public final class MainActivity extends Activity {
                     throw new ApiException(400, "分析提示词格式不正确。");
             }
             return new JSONObject().put("model", model).put("stream", false).put("thinking", new JSONObject().put("type", "disabled"))
-                .put("max_tokens", 8192).put("response_format", new JSONObject().put("type", "json_object")).put("messages", prepared);
+                .put("max_tokens", payload.optString("purpose").equals("semantics") ? 4096 : 8192).put("response_format", new JSONObject().put("type", "json_object")).put("messages", prepared);
         }
         JSONObject questions = payload.getJSONObject("questions"), answerKeys = new JSONObject(), example = new JSONObject();
         java.util.Iterator<String> ids = questions.keys();
@@ -581,7 +604,8 @@ public final class MainActivity extends Activity {
                     if (!cancelled.contains(id)) {
                         int code = error instanceof ApiException ? ((ApiException)error).status : error instanceof SocketTimeoutException ? 504 : 502;
                         String message = error instanceof ApiException ? error.getMessage() : networkMessage(error);
-                        try { deliver(id, false, new JSONObject().put("status", code).put("error", message)); } catch (Exception ignored) {}
+                        try { deliver(id, false, new JSONObject().put("status", code).put("error", message)
+                            .put("code", error instanceof ApiException ? ((ApiException)error).code : null)); } catch (Exception ignored) {}
                     }
                 } finally { jobs.remove(id); cancelled.remove(id); }
             });
@@ -676,8 +700,14 @@ public final class MainActivity extends Activity {
     }
     private static String encode(byte[] value) { return Base64.encodeToString(value, Base64.NO_WRAP); }
     private static byte[] decode(String value) { return Base64.decode(value, Base64.NO_WRAP); }
+    private static String budgetErrorCode(JSONObject value) {
+        JSONObject detail = value.optJSONObject("detail");
+        return detail != null && "max_tokens_exceeded".equals(detail.opt("error_type")) ? "max_tokens_exceeded" : null;
+    }
     private static final class ApiException extends Exception {
         final int status;
-        ApiException(int status, String message) { super(message); this.status = status; }
+        final String code;
+        ApiException(int status, String message) { this(status, message, null); }
+        ApiException(int status, String message, String code) { super(message); this.status = status; this.code = code; }
     }
 }

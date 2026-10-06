@@ -18,10 +18,10 @@ function buildInfo(zip: Buffer, path: string) {
     const name = zip.subarray(cursor + 46, cursor + 46 + length).toString("utf8").replaceAll("\\", "/");
     if (name === path) {
       const offset = zip.readUInt32LE(cursor + 42), method = zip.readUInt16LE(cursor + 10), size = zip.readUInt32LE(cursor + 20);
-      if (size > 4096 || zip.readUInt32LE(cursor + 24) > 4096) throw new Error("Oversized build metadata");
+      if (size > 8192 || zip.readUInt32LE(cursor + 24) > 8192) throw new Error("Oversized build metadata");
       const start = offset + 30 + zip.readUInt16LE(offset + 26) + zip.readUInt16LE(offset + 28);
       const compressed = zip.subarray(start, start + size);
-      const content = method === 8 ? inflateRawSync(compressed, { maxOutputLength: 4096 }) : method === 0 ? compressed : null;
+      const content = method === 8 ? inflateRawSync(compressed, { maxOutputLength: 8192 }) : method === 0 ? compressed : null;
       if (!content) throw new Error("Unsupported ZIP entry");
       return buildInfoSchema.parse(JSON.parse(content.toString("utf8")));
     }
@@ -39,6 +39,7 @@ const sha = (data: Buffer) => createHash("sha256").update(data).digest("hex");
 const windows = buildInfo(portable, "www/build-info.json"), android = buildInfo(apk, "assets/www/build-info.json");
 if (windows.platform !== "windows" || android.platform !== "android" || windows.version !== version || android.version !== version)
   throw new Error("Package platforms/versions do not match this Release");
+if (!windows.changes?.length || !android.changes?.length) throw new Error("Build both packages with this update's release notes before publication.");
 const manifest = updateManifestSchema.parse({ schema: 1, platforms: {
   windows: { ...windows, asset: installerName, sha256: sha(installer) },
   android: { ...android, asset: apkName, sha256: sha(apk) },

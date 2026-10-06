@@ -1,5 +1,6 @@
 import { EMOTIONS } from "../shared/labels";
 import { INTENTS } from "../shared/intents";
+import { EXPRESSION_LABELS } from '../shared/semantic-display';
 import { RELATIONS, TONES, metricLabel, statusLabel, type Message } from "../shared/types";
 import { replyRating } from "../shared/ratings";
 import type { SavedConversation } from "./storage";
@@ -28,6 +29,15 @@ export function sharedMessages(source: ShareSource, ids: readonly string[], alia
       } else {
         if (r.emotions) { summary.push(`情绪：${distribution(r.emotions, labels(EMOTIONS), 3)}`); details.push(`完整情绪分布：${distribution(r.emotions, labels(EMOTIONS))}`); }
         if (r.intents) { summary.push(`意图：${distribution(r.intents, labels(INTENTS), 3)}`); details.push(`完整意图分布：${distribution(r.intents, labels(INTENTS))}`); }
+        if (r.intentVersion) details.push('意图层：表层行为');
+        if (r.communicationStrategies !== undefined) summary.push(`对方的表达方式（独立概率）：${distribution(r.communicationStrategies, labels(EXPRESSION_LABELS), 3) || '不确定'}`);
+        if (r.subtext) summary.push(`潜台词：${r.subtext}`);
+        if (r.contextDependency !== undefined) details.push(`上下文依赖度：${percent(r.contextDependency)} [${r.contextDependency}]`);
+        if (r.semanticConfidence !== undefined) details.push(`补充分析置信度（模型估计）：${percent(r.semanticConfidence)} [${r.semanticConfidence}]`);
+        if (r.semanticEvidenceIds?.length) details.push(`上下文依据消息：${r.semanticEvidenceIds.map(id => c.messages.findIndex(m => m.id === id) + 1).filter(n => n > 0).map(n => `#${n}`).join('、')}（未选中的依据原文不导出）`);
+        if (r.semanticAnalysis?.model) details.push(r.semanticAnalysis.judgeModel
+          ? `策略与潜台词模型：判断 ${r.semanticAnalysis.judgeModel}；解释 ${r.semanticAnalysis.model}`
+          : `策略与潜台词模型：${r.semanticAnalysis.model}`);
       }
       if (r.tone) summary.push(`语气：${TONES[r.tone] || r.tone}${r.toneConfidence === undefined ? "" : ` ${percent(r.toneConfidence)}`}`);
       if (r.tones) details.push(`语气分布：${distribution(r.tones, TONES)}`);

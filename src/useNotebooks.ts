@@ -30,7 +30,7 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
     return { schema: 1, rubric: RUBRIC, messages, self, other, relation, lines: a.lines,
       events: a.events, overview: a.overview, trend: a.trend, analyzedCount: a.analyzedCount,
       completed: a.status === "complete" && a.overviewFresh && a.analyzedCount === messages.length,
-      targetCache: a.targetCache(), analysisUsage: a.analysisUsage, failedAnalysisUsage: a.failedAnalysisUsage, analysisIdentity: a.analysisIdentity };
+      targetCache: a.targetCache(), analysisUsage: a.analysisUsage, failedAnalysisUsage: a.failedAnalysisUsage, analysisIdentity: a.analysisIdentity, semanticUsage: a.semanticUsage };
   }
   function capture(): Notebook | null {
     if (!active) return null;
@@ -68,7 +68,7 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
     pending.current = capture();
     if (a.status !== "loading") flush();
     else if (!timer.current) timer.current = setTimeout(flush, 750);
-  }, [ready, active, messages, input, self, other, relation, a.lines, a.events, a.overview, a.overviewFresh, a.trend, a.analyzedCount, a.status, a.analysisUsage, a.failedAnalysisUsage, a.analysisIdentity]);
+  }, [ready, active, messages, input, self, other, relation, a.lines, a.events, a.overview, a.overviewFresh, a.trend, a.analyzedCount, a.status, a.analysisUsage, a.failedAnalysisUsage, a.analysisIdentity, a.semanticUsage]);
   useEffect(() => { if (a.status === 'loading') setWorkspaceNotice(''); }, [a.status]);
   useEffect(() => {
     const hidden = () => { if (timer.current) flush(); };

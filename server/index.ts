@@ -3,8 +3,10 @@ import express from "express";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { analyze, requestSchema } from "./analysis";
-import { providerStatus, ConfigurationError } from "./provider-config";
-import { ProviderError, providerErrorMessage } from "./provider";
+import { providerStatus, semanticProviderStatus, configuredProfiles, getConfiguredProviderConfig, ConfigurationError } from "./provider-config";
+import { ProviderError, providerErrorMessage, evaluateSemanticPayload, evaluate } from "./provider";
+import { analyzeSemantics, semanticFailureDetails, semanticGuidanceSchema } from '../shared/semantics';
+import { analyzeJevSemantics } from '../shared/semantic-judgment';
 import { analysisFailureDetails } from '../shared/provider-contract';
 import { createReleaseChecker } from "./updates";
 const app = express();
@@ -16,7 +18,7 @@ app.use((_req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   next();
 });
-app.get("/api/health", (_req, res) => res.json(providerStatus()));
+app.get("/api/health", (_req, res) => res.json({ ...providerStatus(), profiles: configuredProfiles(), semantics: semanticProviderStatus() }));
 const checkRelease = createReleaseChecker();
 app.get("/api/updates", async (req, res) => {
   try { res.json(await checkRelease(req.query.fresh === "1")); }
@@ -26,7 +28,9 @@ let calls = 0;
 let windowAt = Date.now();
 let active = 0;
 const budgets = new Map<string, { count: number; at: number }>();
-app.post("/api/analyze", async (req, res) => {
+app.post(["/api/analyze", "/api/semantics", "/api/semantic-judgment"], async (req, res) => {
+  const semantics = req.path === '/api/semantics';
+  const judgment = req.path === '/api/semantic-judgment';
   const origin = req.headers.origin;
   if (
     origin &&
@@ -37,11 +41,18 @@ app.post("/api/analyze", async (req, res) => {
     return;
   }
   const valid = requestSchema.safeParse(req.body);
-  if (!valid.success) {
+  if (!valid.success || ((semantics || judgment) && valid.data.task !== 'other_messages')
+    || (semantics && req.body.jevJudgments !== undefined && !semanticGuidanceSchema.safeParse(req.body.jevJudgments).success)
+    || (judgment && !['typesafe', 'vercel', 'openrouter'].includes(req.body.judgeProvider))) {
     res.status(400).json({ error: "聊天结构或长度不符合要求，请校正后重试" });
     return;
   }
-  const configuration = providerStatus();
+  let configuration;
+  try {
+    const selected = judgment ? req.body.judgeProvider : req.body.analysisProvider;
+    configuration = semantics ? { ...semanticProviderStatus(), error: '请单独配置 DeepSeek 的 DEEPSEEK_API_KEY 后补充策略与潜台词。' }
+      : selected ? { configured: true, ...getConfiguredProviderConfig(selected) } : providerStatus();
+  } catch (error) { res.status(503).json({ error: error instanceof ConfigurationError ? error.message : '模型配置不可用。' }); return; }
   if (!configuration.configured) {
     res.status(503).json({ error: configuration.error });
     return;
@@ -78,7 +89,10 @@ app.post("/api/analyze", async (req, res) => {
     if (!res.writableEnded) controller.abort();
   });
   try {
-    res.json(await analyze(valid.data, controller.signal));
+    res.json(semantics ? await analyzeSemantics({ ...valid.data, ...(req.body.jevJudgments !== undefined ? { jevJudgments: req.body.jevJudgments } : {}) }, evaluateSemanticPayload, controller.signal)
+      : judgment ? await analyzeJevSemantics(valid.data, req.body.judgeProvider,
+        (payload, signal) => evaluate(payload, signal, getConfiguredProviderConfig(req.body.judgeProvider)), controller.signal)
+      : await analyze(valid.data, controller.signal, req.body.analysisProvider));
   } catch (error) {
     const code = Number((error as { status?: number }).status) || 502;
     if (!res.headersSent && !controller.signal.aborted)
@@ -88,6 +102,8 @@ app.post("/api/analyze", async (req, res) => {
             ? error.message
             : providerErrorMessage(error),
         ...analysisFailureDetails(error),
+        ...semanticFailureDetails(error),
+        ...(error instanceof ProviderError && error.providerCode ? { code: error.providerCode } : {}),
       });
   } finally {
     active--;

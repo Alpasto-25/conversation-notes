@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { updateChangesSchema } from '../shared/updates';
 
 const source = (path: string) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 test("Windows and Android versions and package filenames align with the app version", async () => {
   const { version } = JSON.parse(await source("package.json"));
+  const notes = JSON.parse(await source('release-notes.json'));
+  assert.equal(notes.version, version);
+  assert.ok(updateChangesSchema.parse(notes.changes).length);
   assert.match(version, /^\d+\.\d+\.\d+$/);
   const native = await source("desktop/Main.cs");
   const versions = [...native.matchAll(/Assembly(?:File)?Version\("([^"]+)"\)/g)];

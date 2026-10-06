@@ -7,7 +7,7 @@ const projectRoot = resolve(import.meta.dirname, '..');
 const allowedRoots = new Set([
   'src', 'shared', 'server', 'tests', 'public', 'android', 'desktop', 'docs', 'scripts',
   'README.md', 'README.en.md', 'ACKNOWLEDGEMENTS.md', 'CHANGELOG.md', 'SECURITY.md',
-  'LICENSE', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts',
+  'LICENSE', 'package.json', 'package-lock.json', 'release-notes.json', 'tsconfig.json', 'vite.config.ts',
   'index.html', '.gitignore', '.env.example',
   'UI_STYLE.md',
 ]);

@@ -7,12 +7,16 @@ A two-person text conversation analyzer for Windows and Android.
 - Read message-by-message emotions, intentions, reply feedback, and suggestions across everyday, family, work, and relationship conversations.
 - Organize local notes in folders and recover deleted notes from the recycle bin.
 - Share selected messages as images or TXT files.
+- Enable optional expression and subtext analysis with DeepSeek alone or Jev + DeepSeek.
+- View concise usage and estimated DeepSeek costs.
 
 **The software is free. Bring your own API key; your selected provider charges for model calls.**
 
 ## Download and install
 
-[Quark download](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA) (code: LQxA) · [GitHub downloads and updates](https://github.com/Alpasto-25/conversation-notes/releases/latest)
+[Latest GitHub release](https://github.com/Alpasto-25/conversation-notes/releases/latest) · [Quark mirror](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA) (code: LQxA)
+
+**Download 1.1.4 from GitHub.**
 
 - **Windows:** run the installer, or extract the portable ZIP and run ConversationNotes.exe.
 - **Android 8.0+:** install the APK.
@@ -26,6 +30,8 @@ Update over the existing installation. Do not uninstall on Android first, so you
 3. Start analysis and read the results. You can continue after adding new messages.
 
 Supports Jev through TypeSafe, Vercel AI Gateway, or OpenRouter, and the official DeepSeek API. The configuration page includes key setup instructions.
+
+Expression and subtext explanations require DeepSeek. In Jev + DeepSeek mode, Jev makes the judgments and DeepSeek explains them; in DeepSeek-only mode, DeepSeek handles both. Detailed Jev usage is unavailable. DeepSeek cost estimates are for reference; your provider's bill applies.
 
 ## Data and privacy
 

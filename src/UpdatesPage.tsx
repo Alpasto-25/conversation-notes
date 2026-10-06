@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { RefreshCw } from "lucide-react";
 import { APP_BUILD } from "./platform";
 import { UpdateDownloads } from "./UpdateDownloads";
+import { UpdateChanges } from "./UpdateChanges";
 import type { useUpdates } from "./useUpdates";
 
 export function UpdatesPage({ updates }: { updates: ReturnType<typeof useUpdates> }) {
@@ -21,6 +22,8 @@ export function UpdatesPage({ updates }: { updates: ReturnType<typeof useUpdates
         : updates.result?.status === "available" ? `发现新版 v${updates.result.version}`
         : updates.result ? updates.result.message : "尚未检查更新"}
     </div>
+    <UpdateChanges changes={updates.result?.status === 'available' ? updates.result.changes : APP_BUILD.changes}
+      title={updates.result?.status === 'available' ? '新版更新内容' : '当前版本更新内容'} />
     {updates.checkedAt && <p className="update-time">上次成功检查：{new Date(updates.checkedAt).toLocaleString()}</p>}
     <div className="update-actions">
       <button className="secondary" disabled={updates.checking} onClick={check}><RefreshCw size={16} className={updates.checking ? "update-spinner" : undefined} /> {updates.checking ? "检查中…" : "检查更新"}</button>

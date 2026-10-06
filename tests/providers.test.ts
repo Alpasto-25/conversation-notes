@@ -18,6 +18,39 @@ import {
 import { updateConfiguration, saveConfiguration } from "../scripts/setup";
 import { analyze, buildRequest } from "../server/analysis";
 import type { AnalysisRequest } from "../shared/types";
+import { jevBudgetErrorCode, JEV_TOKEN_BUDGET_ERROR, validateReturnedUsage } from '../shared/provider-contract';
+
+test('本机零调用结果可通过用量校验，实际供应商返回仍要求正数请求', () => {
+  for (const zero of [{ input_tokens: 0, output_tokens: 0, requests: 0, details: [] },
+    { input_tokens: 0, output_tokens: 0, requests: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 }])
+    assert.deepEqual(validateReturnedUsage(zero), zero);
+  const zero = { input_tokens: 0, output_tokens: 0, requests: 0, details: [] };
+  for (const patch of [{ input_tokens: 1 }, { output_tokens: 1 }, { requests: -1 }, { prompt_cache_hit_tokens: 1 },
+    { prompt_cache_miss_tokens: 1 }, { details: [{}] }]) assert.throws(() => validateReturnedUsage({ ...zero, ...patch }));
+  assert.throws(() => validateResult({ ...fixture, usage: zero }, payload.questions));
+  assert.equal(validateReturnedUsage(fixture.usage).input_tokens, 100);
+});
+
+test('只传递 TypeSafe 的固定超限代码，不暴露原始错误或误识别普通400与认证失败', async () => {
+  assert.equal(jevBudgetErrorCode({ detail: { error_type: JEV_TOKEN_BUDGET_ERROR, message: 'private echo' } }), JEV_TOKEN_BUDGET_ERROR);
+  for (const value of [null, { message: JEV_TOKEN_BUDGET_ERROR }, { detail: JEV_TOKEN_BUDGET_ERROR }, { detail: { error_type: 'invalid_input' } }])
+    assert.equal(jevBudgetErrorCode(value), undefined);
+  const config = getProviderConfig({ TYPESAFE_API_KEY: 'synthetic-only-key' });
+  for (const [status, detail, expected] of [[400, JEV_TOKEN_BUDGET_ERROR, JEV_TOKEN_BUDGET_ERROR], [400, 'invalid_input', undefined], [401, JEV_TOKEN_BUDGET_ERROR, undefined]] as const) {
+    let calls = 0;
+    const mock: typeof fetch = async () => {
+      calls++;
+      return Response.json({ detail: { error_type: detail, message: 'PRIVATE_ECHO synthetic-only-key' } }, { status });
+    };
+    await assert.rejects(() => evaluate(payload, undefined, config, mock), error => {
+      assert.ok(error instanceof ProviderError);
+      assert.equal(error.status, status); assert.equal(error.providerCode, expected);
+      assert.doesNotMatch(error.message, /PRIVATE_ECHO|synthetic-only-key/);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
 
 const payload = {
   state: { message: "Synthetic connection test" },

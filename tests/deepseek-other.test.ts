@@ -70,7 +70,7 @@ test('紧凑回答不容许未知正候选、全零、错误类型或混用两�
   assert.throws(() => validateNativeResult(envelope({}), { [id]: q }, payload));
   assert.equal(deepseekPromptVersion('self_message'), 'conversation-prefix-v1');
   assert.equal(deepseekPromptVersion('overview'), 'conversation-prefix-v1');
-  assert.equal(deepseekPromptVersion('other_messages'), 'other-sparse-v2');
+  assert.equal(deepseekPromptVersion('other_messages'), 'other-sparse-v3-surface');
 });
 
 test('任务汇总按模型与完整规则分组，真实加权命中率和缺失字段保持正确', () => {

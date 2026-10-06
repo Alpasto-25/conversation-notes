@@ -76,3 +76,27 @@ export function providerStatus(
     return { configured: false, error: error.message };
   }
 }
+
+// A secondary request must never borrow the active Jev key or switch the active provider.
+export function getSemanticProviderConfig(env: Record<string, string | undefined> = process.env) {
+  const activeDeepseek = env.JEV_PROVIDER?.trim().toLowerCase() === 'deepseek';
+  return getProviderConfig({ JEV_PROVIDER: 'deepseek', JEV_MODEL: activeDeepseek ? env.JEV_MODEL : undefined,
+    DEEPSEEK_API_KEY: activeDeepseek ? env.JEV_API_KEY || env.DEEPSEEK_API_KEY : env.DEEPSEEK_API_KEY });
+}
+export function semanticProviderStatus(env: Record<string, string | undefined> = process.env) {
+  try { return { configured: true, model: getSemanticProviderConfig(env).model }; }
+  catch (error) { if (!(error instanceof ConfigurationError)) throw error; return { configured: false }; }
+}
+export function getConfiguredProviderConfig(provider: string, env: Record<string, string | undefined> = process.env) {
+  if (!Object.hasOwn(PROVIDERS, provider)) throw new ConfigurationError('模型平台不受支持。');
+  if (provider === 'deepseek') return getSemanticProviderConfig(env);
+  const active = (env.JEV_PROVIDER?.trim().toLowerCase() || 'typesafe') === provider;
+  return getProviderConfig({ ...env, JEV_PROVIDER: provider, JEV_API_KEY: active ? env.JEV_API_KEY : undefined,
+    JEV_MODEL: active ? env.JEV_MODEL : undefined });
+}
+export function configuredProfiles(env: Record<string, string | undefined> = process.env) {
+  return Object.keys(PROVIDERS).map(provider => {
+    try { const config = getConfiguredProviderConfig(provider, env); return { provider, model: config.model, configured: true }; }
+    catch (error) { if (!(error instanceof ConfigurationError)) throw error; return { provider, model: PROVIDERS[provider as Provider].model, configured: false }; }
+  });
+}

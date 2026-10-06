@@ -22,6 +22,7 @@ export type SavedConversation = {
   analysisUsage?: AnalysisUsage;
   failedAnalysisUsage?: AnalysisUsage;
   analysisIdentity?: AnalysisIdentity;
+  semanticUsage?: AnalysisUsage;
 };
 export function createNotebookStore(factory?: IDBFactory) {
   let connection: Promise<IDBDatabase> | undefined;

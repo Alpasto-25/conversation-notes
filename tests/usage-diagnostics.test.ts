@@ -3,9 +3,41 @@ import assert from 'node:assert/strict';
 import { buildRequest } from '../shared/analysis-core';
 import { overviewJob } from '../shared/incremental';
 import { deepseekEnvelope, deepseekAnswerFormat, deepseekRequest, evaluateCausalDeepseek, evaluateWithDeepseekRepair } from '../shared/deepseek';
-import { addUsage } from '../shared/usage';
+import { addUsage, combineAnalysisUsage, type AnalysisUsage } from '../shared/usage';
 import { IDBFactory } from 'fake-indexeddb';
 import { createNotebookStore } from '../src/storage';
+
+test('统一用量合计基础与补充请求，保留任务明细和未知缓存数', () => {
+  const primary: AnalysisUsage = { input_tokens: 100, output_tokens: 20, requests: 1, model: 'jev-1.13.0', run_id: 'primary',
+    local_targets: 2, elapsed_ms: 400, started_at: '2026-10-06T01:00:00.000Z', finished_at: '2026-10-06T01:00:00.400Z' };
+  const semantic: AnalysisUsage = { input_tokens: 70, output_tokens: 30, requests: 2, model: 'jev-1.13.0 + deepseek-flash', run_id: 'semantic',
+    prompt_cache_hit_tokens: 50, prompt_cache_miss_tokens: 20, local_targets: 3, elapsed_ms: 200,
+    started_at: '2026-10-06T02:00:00.000Z', finished_at: '2026-10-06T02:00:00.200Z' };
+  const combined = combineAnalysisUsage([primary, undefined, semantic])!;
+  assert.equal(combined.input_tokens, 170); assert.equal(combined.output_tokens, 50); assert.equal(combined.requests, 3);
+  assert.equal(combined.local_targets, 5); assert.equal(combined.elapsed_ms, 600);
+  assert.equal(combined.prompt_cache_hit_tokens, undefined); assert.equal(combined.prompt_cache_miss_tokens, undefined);
+  assert.equal(combined.model, 'jev-1.13.0 + deepseek-flash');
+  assert.equal(combined.started_at, primary.started_at); assert.equal(combined.finished_at, semantic.finished_at);
+});
+
+test('统一用量不重复累计同一运行记录，旧记录的未知请求数保持未知', () => {
+  const run: AnalysisUsage = { input_tokens: 50, output_tokens: 10, local_targets: 0, elapsed_ms: 300, run_id: 'one-run' };
+  const combined = combineAnalysisUsage([run, { ...run }])!;
+  assert.equal(combined.input_tokens, 50); assert.equal(combined.output_tokens, 10); assert.equal(combined.elapsed_ms, 300);
+  assert.equal(combined.requests, undefined);
+  assert.equal(combineAnalysisUsage([undefined]), undefined);
+});
+
+test('零调用补充不会增加真实接口用量，进行中的分析没有虚构结束时间', () => {
+  const paid: AnalysisUsage = { input_tokens: 80, output_tokens: 15, requests: 1, local_targets: 0, elapsed_ms: 700,
+    prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 80, finished_at: '2026-10-06T01:00:00.700Z' };
+  const local: AnalysisUsage = { input_tokens: 0, output_tokens: 0, requests: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0,
+    details: [], local_targets: 3, elapsed_ms: 10 };
+  const combined = combineAnalysisUsage([paid, local])!;
+  assert.equal(combined.requests, 1); assert.equal(combined.input_tokens, 80); assert.equal(combined.output_tokens, 15);
+  assert.equal(combined.prompt_cache_miss_tokens, 80); assert.equal(combined.finished_at, undefined);
+});
 import { emptyConversation, newNotebook, organizeNotebook, withoutMessages } from '../src/notebooks';
 
 test('诊断保留供应商模型与用量，不增加请求或改变 prompt，也不保存原文和 Key', async () => {

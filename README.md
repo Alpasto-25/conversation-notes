@@ -7,12 +7,16 @@
 - 逐句查看情绪、意图、回复评价和表达建议，支持朋友、家庭、工作及恋爱等场景。
 - 用文件夹整理对话，记录保存在本机，支持回收站恢复。
 - 将选中的对话片段分享为图片或 TXT。
+- 按需开启表达方式与潜台词，选择仅 DeepSeek 或 Jev + DeepSeek。
+- 查看简明分析用量及 DeepSeek 预估费用。
 
 **软件免费；分析需要自备 API Key，模型调用费用由所选平台收取。**
 
 ## 下载与安装
 
-[夸克网盘](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA)（提取码 `LQxA`） · [GitHub 下载与更新说明](https://github.com/Alpasto-25/conversation-notes/releases/latest)
+[GitHub 最新版与更新说明](https://github.com/Alpasto-25/conversation-notes/releases/latest) · [夸克备用下载](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA)（提取码 `LQxA`）
+
+**1.1.4 请从 GitHub 发布页下载。**
 
 - **Windows**：下载安装包，或解压便携包后运行 `ConversationNotes.exe`。
 - **Android 8.0+**：下载 APK 安装。
@@ -26,6 +30,8 @@
 3. 点击分析查看结果；追加新聊天后可继续分析。
 
 支持 TypeSafe、Vercel AI Gateway、OpenRouter 提供的 Jev，以及 DeepSeek 官方 API。配置页提供 Key 获取指引。
+
+表达方式与潜台词解读需要 DeepSeek。选择 Jev + DeepSeek 时，Jev 负责判断，DeepSeek 根据判断解读；仅 DeepSeek 时两部分都由它完成。Jev 无法提供详细用量，DeepSeek 费用为估算，以平台账单为准。
 
 ## 数据与隐私
 

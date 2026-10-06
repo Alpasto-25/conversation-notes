@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { buildInfoSchema, compareVersions, inspectRelease, RELEASES_URL, QUARK_DOWNLOAD_URL, QUARK_EXTRACTION_CODE, UPDATE_MARKER, type BuildInfo } from "../shared/updates";
 import { readFile } from "node:fs/promises";
 import { createReleaseChecker } from "../server/updates";
+import { releaseChanges, shouldShowInstalledChanges } from '../shared/updates';
 
 const current: BuildInfo = { schema: 1, platform: "windows", version: "1.1.0", buildId: "local-build-0001", builtAt: "2026-01-01T00:00:00.000Z" };
 const android = { ...current, platform: "android" as const };
@@ -20,6 +21,30 @@ test("same version with a newer internal build triggers an identifiable reminder
   assert.equal(result.status, "available");
   assert.match(result.message, /同版本/);
   assert.equal(result.reminderId, "windows:1.1.0:remote-build-0002");
+});
+test('更新内容优先采用实际包内元信息，旧发布可读取用户变更列表', () => {
+  const release = fixture();
+  release.body = '# 对话手记\n\n## 本次更新\n\n- **改善阅读**，支持[分享](https://example.com)。\n- 修复导入。\n\n## 下载\n\n- 不是更新内容。\n\n' + release.body;
+  assert.deepEqual(inspectRelease(release, current).changes, ['改善阅读，支持分享。', '修复导入。']);
+  release.body = release.body.replace('"builtAt":', '"changes":["包内的实际更新。"],"builtAt":');
+  assert.deepEqual(inspectRelease(release, current).changes, ['包内的实际更新。']);
+  assert.deepEqual(releaseChanges('## 本次更新\n- 最后一项。'), ['最后一项。']);
+  assert.deepEqual(releaseChanges('无更新列表'), []);
+});
+test('更新内容限制长度和数量，文本不会被当作网页执行', () => {
+  assert.deepEqual(releaseChanges('## 本次更新\n- <script>文本</script>\n<!-- hidden -->'), ['<script>文本</script>']);
+  assert.equal(releaseChanges('## 本次更新\n' + Array.from({length:20}, () => '- ' + '长'.repeat(300)).join('\n')).length, 8);
+  const release = fixture();
+  release.body = release.body.replace('"builtAt":', '"changes":["' + '长'.repeat(181) + '"],"builtAt":');
+  assert.equal(inspectRelease(release, current).status, 'unknown');
+});
+test('安装更新的说明仅向使用过应用且未看过本构建的用户显示', () => {
+  const build = { ...current, changes: ['改善阅读。'] };
+  assert.equal(shouldShowInstalledChanges(build, null, false), false);
+  assert.equal(shouldShowInstalledChanges(build, null, true), true);
+  assert.equal(shouldShowInstalledChanges(build, current.buildId, true), false);
+  assert.equal(shouldShowInstalledChanges(build, 'older-build', true), true);
+  assert.equal(shouldShowInstalledChanges(current, null, true), false);
 });
 test("1.1.1 patch publication updates 1.1.0 on each platform but never suggests updating itself", () => {
   for (const platform of ["windows", "android"] as const) {

@@ -1,13 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { inspectRelease, UPDATE_INTERVAL, type UpdateResult } from "../shared/updates";
+import { inspectRelease, shouldShowInstalledChanges, UPDATE_INTERVAL, type UpdateResult } from "../shared/updates";
 import { APP_BUILD, checkUpdates } from "./platform";
+import { shouldShowOnboarding } from "../shared/provider-guides";
 
 const PREF = "conversation-notes-auto-updates-v1";
 const DISMISSED = "conversation-notes-dismissed-update-v1";
+const SEEN_BUILD = "conversation-notes-seen-build-v1";
 function stored(key: string) { try { return localStorage.getItem(key); } catch { return null; } }
 function store(key: string, value: string) { try { localStorage.setItem(key, value); } catch { /* Preferences are optional. */ } }
 
 export function useUpdates() {
+  const [showInstalledChanges, setShowInstalledChanges] = useState(() => {
+    let hasUsedApp = false;
+    try { hasUsedApp = !shouldShowOnboarding(localStorage); } catch { /* First use remains quiet. */ }
+    return shouldShowInstalledChanges(APP_BUILD, stored(SEEN_BUILD), hasUsedApp);
+  });
+  useEffect(() => {
+    if (!showInstalledChanges) store(SEEN_BUILD, APP_BUILD.buildId);
+  }, [showInstalledChanges]);
   const [automatic, setAutomatic] = useState(() => stored(PREF) !== "off");
   const [dismissed, setDismissed] = useState(() => stored(DISMISSED));
   const [snoozed, setSnoozed] = useState<string>();
@@ -52,6 +62,8 @@ export function useUpdates() {
   useEffect(() => () => { const job = running.current; running.current = null; job?.abort(); }, []);
   return {
     automatic, result, error, checking, checkedAt, check,
+    showInstalledChanges,
+    acknowledgeInstalledChanges() { store(SEEN_BUILD, APP_BUILD.buildId); setShowInstalledChanges(false); },
     hasUpdate: result?.status === "available",
     showReminder: result?.status === "available" && result.reminderId !== dismissed && result.reminderId !== snoozed,
     snooze() { setSnoozed(result?.reminderId); },

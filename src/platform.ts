@@ -3,6 +3,10 @@ import { ProviderError, analysisFailureDetails } from "../shared/provider-contra
 import { evaluateWithDeepseekRepair, evaluateCausalDeepseek, nativeDeepseekPayload, type DeepseekRequest } from "../shared/deepseek";
 import { isOfficialProviderUrl } from "../shared/provider-guides";
 import { RELEASES_URL, QUARK_DOWNLOAD_URL, type BuildInfo } from "../shared/updates";
+import { analyzeSemantics, semanticFailureDetails, semanticGuidanceSchema, type SemanticRequest } from '../shared/semantics';
+import { analyzeJevSemantics } from '../shared/semantic-judgment';
+import type { AnalysisConfiguration } from '../shared/analysis-mode';
+export { semanticConfiguration } from '../shared/analysis-mode';
 
 declare const __APP_BUILD_INFO__: BuildInfo;
 export const APP_BUILD = __APP_BUILD_INFO__;
@@ -10,13 +14,7 @@ export const APP_BUILD = __APP_BUILD_INFO__;
 export const isMobile = import.meta.env.MODE === "mobile";
 export const isDesktop = import.meta.env.MODE === "desktop";
 export const isNative = isMobile || isDesktop;
-export type ApiStatus = {
-  configured: boolean;
-  provider?: string;
-  model?: string;
-  error?: string;
-  profiles?: { provider: string; model: string; configured: boolean }[];
-};
+export type ApiStatus = AnalysisConfiguration;
 type NativeBridge = {
   call(id: string, method: string, payload: string): void;
   cancel(id: string): void;
@@ -57,11 +55,12 @@ if (isNative) {
     if (!request) return;
     if (ok) request.resolve(value);
     else {
-      const error = value as { status?: number; error?: string };
+      const error = value as { status?: number; error?: string; code?: unknown };
       request.reject(
         new ProviderError(
           error.status || 502,
           error.error || "请求失败，请重试。",
+          error.code === 'max_tokens_exceeded' ? error.code : undefined,
         ),
       );
     }
@@ -122,8 +121,35 @@ export async function getApiStatus(): Promise<ApiStatus> {
   if (!response.ok) throw new Error("本机服务未响应");
   return response.json();
 }
-export function saveMobileConfig(provider: string, apiKey: string, model?: string) {
-  return nativeCall<ApiStatus>("configure", { provider, apiKey, model });
+export function saveMobileConfig(provider: string, apiKey: string, model?: string, activate = true) {
+  return nativeCall<ApiStatus>("configure", { provider, apiKey, model, activate });
+}
+export async function semanticsFetch(input: SemanticRequest, signal: AbortSignal) {
+  if (!isNative) return fetch('/api/semantics', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal });
+  try {
+    const { requestSchema } = await import('../shared/analysis-core');
+    const valid = requestSchema.safeParse(input);
+    if (!valid.success) throw new ProviderError(400, '补充分析的聊天结构或长度不符合要求。');
+    if (input.jevJudgments !== undefined && !semanticGuidanceSchema.safeParse(input.jevJudgments).success) throw new ProviderError(400, 'Jev 判断格式不符合要求。');
+    return Response.json(await analyzeSemantics({ ...valid.data, ...(input.jevJudgments !== undefined ? { jevJudgments: input.jevJudgments } : {}) }, (payload, requestSignal) => nativeCall('evaluate', payload, requestSignal), signal));
+  } catch (error) {
+    if (signal.aborted) throw error;
+    return Response.json({ error: error instanceof Error ? error.message : '补充分析失败，请重试。', ...semanticFailureDetails(error) },
+      { status: error instanceof ProviderError ? error.status : 502 });
+  }
+}
+export async function jevJudgmentFetch(input: AnalysisRequest, provider: string, signal: AbortSignal) {
+  if (!isNative) return fetch('/api/semantic-judgment', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...input, judgeProvider: provider }), signal });
+  try {
+    const { requestSchema } = await import('../shared/analysis-core');
+    const valid = requestSchema.safeParse(input);
+    if (!valid.success) throw new ProviderError(400, '策略判断的聊天结构不符合要求。');
+    return Response.json(await analyzeJevSemantics(valid.data, provider, (payload, requestSignal) => nativeCall('evaluate', payload, requestSignal), signal));
+  } catch (error) {
+    if (signal.aborted) throw error;
+    return Response.json({ error: error instanceof Error ? error.message : 'Jev 策略判断失败。',
+      ...(error instanceof ProviderError && error.providerCode ? { code: error.providerCode } : {}) }, { status: error instanceof ProviderError ? error.status : 502 });
+  }
 }
 export function setNativeAppearance(theme: "system" | "light" | "dark") {
   return nativeCall("setAppearance", { theme });
@@ -166,7 +192,7 @@ export function openQuarkDownloadPage(): Promise<unknown> {
   window.open(QUARK_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
   return Promise.resolve();
 }
-export async function checkMobileConnection() {
+export async function checkMobileConnection(provider?: string) {
   const questions = {
     color: {
       type: "choice" as const,
@@ -190,15 +216,15 @@ export async function checkMobileConnection() {
   const result = await evaluateWithDeepseekRepair({
       state: "This is a connection test. The sky is blue.",
       questions,
-    }, (payload, signal) => nativeCall("evaluate", nativeDeepseekPayload(payload), signal));
+    }, (payload, signal) => nativeCall("evaluate", { ...nativeDeepseekPayload(payload), ...(provider ? { provider } : {}) }, signal));
   return result.model;
 }
-export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal) {
+export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal, provider?: string) {
   if (!isNative)
     return fetch("/api/analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(job),
+      body: JSON.stringify(provider ? { ...job, analysisProvider: provider } : job),
       signal,
     });
   try {
@@ -214,9 +240,11 @@ export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal) {
       valid.data,
       async (payload, requestSignal) => {
         const status = await getApiStatus();
-        const evaluateOnce = (request: DeepseekRequest, signal?: AbortSignal) => nativeCall("evaluate", nativeDeepseekPayload(request), signal);
-        return status.provider === "deepseek" ? evaluateCausalDeepseek(payload, evaluateOnce, requestSignal)
-          : evaluateWithDeepseekRepair(payload, (request, signal) => nativeCall("evaluate", request, signal), requestSignal);
+        const selected = provider ?? status.provider;
+        const routed = (request: object) => provider ? { ...request, purpose: 'primary', provider } : request;
+        const evaluateOnce = (request: DeepseekRequest, signal?: AbortSignal) => nativeCall("evaluate", routed(nativeDeepseekPayload(request)), signal);
+        return selected === "deepseek" ? evaluateCausalDeepseek(payload, evaluateOnce, requestSignal)
+          : evaluateWithDeepseekRepair(payload, (request, signal) => nativeCall("evaluate", routed(request), signal), requestSignal);
       },
       signal,
     );

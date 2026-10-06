@@ -92,6 +92,16 @@ namespace ConversationNotes
             Check(Convert.ToBase64String(File.ReadAllBytes(Path.Combine(folder, "config.dpapi"))) == beforeInvalid, "invalid switch leaves saved config intact");
             store.Configure(Input("typesafe", ""));
             Check(Json.Text(store.Read(), "apiKey") == TestKey, "switching back restores the Jev key");
+            store.Configure(new Dictionary<string, object> { { "provider", "deepseek" }, { "apiKey", deepKey }, { "activate", false } });
+            Check(Json.Text(store.Read(), "provider") == "typesafe" && Json.Text(store.Read(), "apiKey") == TestKey, "secondary DeepSeek save retains active Jev provider and key");
+            Check(Json.Text(store.SemanticConfig(), "apiKey") == deepKey && Json.Text(store.SemanticConfig(), "provider") == "deepseek", "secondary request reads its own saved profile");
+            store.Configure(Input("deepseek", ""));
+            Check(Json.Text(store.ProviderConfig("typesafe"), "apiKey") == TestKey, "dual mode reads saved Jev key while DeepSeek is active");
+            Check(Json.Text(store.Read(), "provider") == "deepseek", "reading dual-mode Jev config never switches saved active provider");
+            Check(Json.Text(store.ProviderConfig("deepseek"), "apiKey") == deepKey, "DeepSeek-only mode reads its own saved key");
+            Reject(() => store.ProviderConfig("unsupported"), 400, "routed primary accepts only fixed providers");
+            store.Configure(Input("typesafe", ""));
+            Reject(() => store.Configure(new Dictionary<string, object> { { "provider", "openrouter" }, { "apiKey", "synthetic-key" }, { "activate", false } }), 400, "secondary config cannot select arbitrary providers");
             string legacyFolder = Path.Combine(folder, "legacy");
             ConfigStore legacy = new ConfigStore(legacyFolder);
             byte[] legacyBytes = System.Security.Cryptography.ProtectedData.Protect(System.Text.Encoding.UTF8.GetBytes(Json.Encode(new { provider = "typesafe", apiKey = TestKey })),
@@ -99,6 +109,7 @@ namespace ConversationNotes
             File.WriteAllBytes(Path.Combine(legacyFolder, "config.dpapi"), legacyBytes);
             Check(Json.Encode(legacy.Status()).Contains("jev-1.13.0"), "legacy encrypted configuration remains readable");
             Check(Convert.ToBase64String(File.ReadAllBytes(Path.Combine(legacyFolder, "config.dpapi"))) == Convert.ToBase64String(legacyBytes), "reading legacy status never rewrites the encrypted file");
+            Reject(() => legacy.SemanticConfig(), 503, "missing secondary key never borrows a legacy Jev key");
             legacy.Configure(Input("deepseek", deepKey)); legacy.Configure(Input("typesafe", ""));
             Check(Json.Text(legacy.Read(), "apiKey") == TestKey, "legacy key migrated without re-entry and retained after switching");
             Reject(() => store.Configure(Input("openrouter", "")), 400, "provider switch needs its own key");
@@ -164,6 +175,34 @@ namespace ConversationNotes
                 Dictionary<string, object> preparedRequest = Json.Decode(Json.Encode(ModelClient.DeepseekRequest(StructuredPayload()["state"], weightQuestions, "deepseek-flash", false, prepared)));
                 Check(Json.Encode(preparedRequest["messages"]) == Json.Encode(prepared), "canonical shared prompt strings are forwarded unchanged");
                 Reject(() => ModelClient.DeepseekRequest(StructuredPayload()["state"], weightQuestions, "deepseek-flash", false, new object[0]), 400, "invalid prepared prompt rejected");
+                Dictionary<string, object> semanticPayload = StructuredPayload();
+                store.Configure(new Dictionary<string, object> { { "provider", "deepseek" }, { "apiKey", deepKey }, { "activate", false } });
+                semanticPayload["purpose"] = "semantics"; semanticPayload["questions"] = new Dictionary<string, object>(); semanticPayload["deepseekMessages"] = prepared;
+                handler.Run = async (request, token) => {
+                    Dictionary<string, object> sent = Json.Decode(await request.Content.ReadAsStringAsync());
+                    Check(request.RequestUri.AbsoluteUri == ModelClient.Endpoint("deepseek") && request.Headers.Authorization.Parameter == deepKey, "semantic transport uses DeepSeek endpoint and its separate key");
+                    Check(Json.Text(store.Read(), "provider") == "typesafe" && Json.Text(store.Read(), "apiKey") == TestKey, "semantic transport does not switch the active model");
+                    Check(Json.Encode(sent["messages"]) == Json.Encode(prepared) && Convert.ToInt32(sent["max_tokens"]) == 4096, "semantic transport forwards shared prompt with bounded output");
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Json.Encode(new {
+                        model = "deepseek-flash", choices = new[] { new { finish_reason = "stop", message = new { content = "{\"analyses\":{}}" } } }, usage = new { prompt_tokens = 5, completion_tokens = 3 }
+                    })) };
+                };
+                Check(Json.Text(Json.Decode(Json.Encode(await client.Evaluate(semanticPayload, CancellationToken.None))), "format") == "deepseek-weights-v4", "semantic raw JSON survives native transport for shared validation");
+                store.Configure(Input("deepseek", ""));
+                Dictionary<string, object> routed = StructuredPayload(); routed["provider"] = "typesafe";
+                handler.Run = async (request, token) => {
+                    Check(request.RequestUri.AbsoluteUri == ModelClient.Endpoint("typesafe") && request.Headers.Authorization.Parameter == TestKey, "dual-mode primary and judgment use saved Jev endpoint and key");
+                    Check(Json.Text(store.Read(), "provider") == "deepseek", "dual-mode requests keep the saved menu selection");
+                    await request.Content.ReadAsStringAsync();
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"model\":\"jev-1.13.0\",\"answers\":{\"a\":{\"type\":\"noul\",\"noul\":0.5}},\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}") };
+                };
+                routed["purpose"] = "primary";
+                Check(Json.Text(Json.Decode(Json.Encode(await client.Evaluate(routed, CancellationToken.None))), "model") == "jev-1.13.0", "dual-mode primary routing reaches Jev");
+                routed["purpose"] = "judgment";
+                Check(Json.Text(Json.Decode(Json.Encode(await client.Evaluate(routed, CancellationToken.None))), "model") == "jev-1.13.0", "strategy judgment routing reaches Jev");
+                routed["provider"] = "deepseek";
+                try { await client.Evaluate(routed, CancellationToken.None); throw new Exception("Expected rejection"); }
+                catch (ApiException error) { Check(error.Status == 400, "dual-mode judgment cannot silently use DeepSeek"); }
                 foreach (string deepModel in new[] { "deepseek-flash" })
                 {
                     store.Configure(new Dictionary<string, object> { { "provider", "deepseek" }, { "apiKey", deepKey }, { "model", deepModel } });
@@ -229,6 +268,17 @@ namespace ConversationNotes
                 handler.Run = (request, token) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized) { Content = new StringContent(TestKey) });
                 try { await client.Evaluate(Payload(), CancellationToken.None); throw new Exception("Expected 401"); }
                 catch (ApiException error) { Check(error.Status == 401 && !error.Message.Contains(TestKey), "provider errors do not leak bodies"); }
+                foreach (string category in new[] { "max_tokens_exceeded", "invalid_input" }) {
+                    int rejectedCalls = 0;
+                    handler.Run = (request, token) => {
+                        rejectedCalls++;
+                        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent(Json.Encode(new { detail = new { error_type = category, message = TestKey } })) });
+                    };
+                    try { await client.Evaluate(Payload(), CancellationToken.None); throw new Exception("Expected budget rejection"); }
+                    catch (ApiException error) { Check(error.Status == 400 && error.Code == (category == "max_tokens_exceeded" ? category : null) && !error.Message.Contains(TestKey), "only the fixed budget code crosses the native bridge"); }
+                    Check(rejectedCalls == 1, "transport leaves target splitting to the frontend");
+                }
+                Check(ModelClient.BudgetErrorCode(Json.Decode("{\"message\":\"max_tokens_exceeded\"}")) == null, "budget classification does not scan arbitrary messages");
                 handler.Run = (request, token) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.Redirect));
                 try { await client.Evaluate(Payload(), CancellationToken.None); throw new Exception("Expected redirect rejection"); }
                 catch (ApiException error) { Check(error.Status == 502, "redirect not accepted"); }

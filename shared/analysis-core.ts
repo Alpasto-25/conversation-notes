@@ -312,7 +312,7 @@ export function buildRequest(input: AnalysisRequest) {
         );
         questions[`${id}_emotions`] = choice(
           ask(
-            `目标消息ID ${ids.get(id)}，sender=other。结合上下文判断这句话最可能表达的主要情绪。考虑玩笑、反话与多义；返回各个候选情绪的分布，不评价好感强度。`,
+            `目标消息ID ${ids.get(id)}，sender=other。结合上下文判断这句话最可能表达的主要情绪。考虑玩笑、反话与多义；返回各个候选情绪的分布，不评价好感强度。短答、嗯、没事和晚安本身不是不满证据；只有前后文支持才判断负面情绪，普通确认或真实休息可以平静。`,
           ),
           Object.fromEntries(
             Object.entries(EMOTIONS).map(([k, v]) => [k, v.criteria]),
@@ -320,7 +320,7 @@ export function buildRequest(input: AnalysisRequest) {
         );
         questions[`${id}_intents`] = choice(
           ask(
-            `目标消息ID ${ids.get(id)}，sender=other。结合当前可见对话，判断这句话最主要的沟通意图或目的。区分情绪与意图。各选项是竞争性解读，不是同时成立的心理成分。日常回答、分享、接话也是有效意图；有具体证据才选择暧昧或隐藏动机，不因关系设置预设每句话都在调情。明确边界不可解释为反向邀请。不知道选unknown，候选不覆盖选other。`,
+            `目标消息ID ${ids.get(id)}，sender=other。结合当前可见对话，判断这句话在字面或行为层面最主要的表层意图：它正在做什么。区分情绪、表层行为与沟通策略；隐含的抗议、情绪撤退、反讽或希望被挽留留给独立策略和潜台词层，不挤进最接近的意图候选。各选项是表层行为的竞争性解读，不是同时成立的心理成分。嗯可以回应收到，晚安可以结束聊天，没有啊可以回答或否认；表层结束不证明深层只想终止交流。日常回答、分享、接话也是有效意图，有文本证据才选择暧昧，不因关系设置预设每句话都在调情。明确边界不可解释为反向邀请。不知道选unknown，候选不覆盖选other。`,
           ),
           Object.fromEntries(
             Object.entries(INTENTS)
@@ -499,6 +499,7 @@ async function analysisResponse(input: AnalysisRequest, result: ReturnType<typeo
             event,
             emotions: emotions.probabilities,
             intents: choiceAnswer.parse(a[`${id}_intents`]).probabilities,
+            intentVersion: 'surface-v1' as const,
             score: {
               value: null,
               confidence: emotions.confidence,

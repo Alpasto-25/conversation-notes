@@ -3,7 +3,7 @@ import { ProviderError } from './provider-contract';
 import { answerQuestionKind, type AnswerIssueCode } from './usage';
 
 export const DEEPSEEK_PROMPT_VERSION = 'conversation-prefix-v1';
-export const DEEPSEEK_OTHER_PROMPT_VERSION = 'other-sparse-v2';
+export const DEEPSEEK_OTHER_PROMPT_VERSION = 'other-sparse-v3-surface';
 export const deepseekPromptVersion = (task: string) => task === 'other_messages' ? DEEPSEEK_OTHER_PROMPT_VERSION : DEEPSEEK_PROMPT_VERSION;
 export type DeepseekContext = {
   commonInstructions: string;

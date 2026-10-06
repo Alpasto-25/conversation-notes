@@ -1,6 +1,7 @@
 import type { MemoryEvent, MemoryUpdate } from "./memory";
 import type { AffinityDimension } from "./affinity";
 import type { TokenUsage } from "./usage";
+import type { SemanticFields, JevSemanticJudgment } from './semantics';
 export type Relation =
   | "general"
   | "new"
@@ -28,13 +29,15 @@ export type Judgment = {
   status: "clear" | "ambiguous" | "insufficient";
   probabilities: Record<string, number>;
 };
-export type LineResult = {
+export type LineResult = Partial<SemanticFields> & {
+  semanticJudgment?: JevSemanticJudgment;
   event?: { kind: MemoryEvent["kind"]; confidence: number };
   skipped?: string;
   id: string;
   score: Judgment;
   emotions?: Record<string, number>;
   intents?: Record<string, number>;
+  intentVersion?: 'surface-v1';
   replyType?: string;
   replyConfidence?: number;
   tone?: string;
