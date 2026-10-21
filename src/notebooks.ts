@@ -1,5 +1,8 @@
 import { RUBRIC, type Relation } from "../shared/types";
 import type { SavedConversation } from "./storage";
+import type { AnalysisVersion } from './analysis-history';
+import type { AnalysisUsage } from '../shared/usage';
+import type { Followup } from './personal-notes';
 
 export type Notebook = {
   schema: 2;
@@ -13,12 +16,23 @@ export type Notebook = {
   draft: string;
   conversation: SavedConversation;
   scenes: Partial<Record<Relation, SavedConversation>>;
+  reading?: { messageId: string; offset: number };
+  undo?: { at: string; label: string; conversation: SavedConversation; scenes: Notebook['scenes']; reading?: Notebook['reading'] };
+  versions?: AnalysisVersion[];
+  runHistory?: AnalysisUsage[];
+  annotation?: string;
+  pinned?: boolean;
+  tags?: string[];
+  favorites?: string[];
+  followups?: Record<string, Followup>;
 };
 export type NotebookSummary = Pick<Notebook, "id" | "title" | "contact" | "createdAt" | "updatedAt" | "deletedAt"> & {
   relation: Relation;
   count: number;
   analyzed: boolean;
   completed: boolean;
+  pinned?: boolean;
+  tags?: string[];
 };
 export function emptyConversation(relation: Relation = "general"): SavedConversation {
   return { schema: 1, rubric: RUBRIC, messages: [], self: "", other: "对方", relation,
@@ -47,7 +61,7 @@ export function summarizeNotebook(n: Notebook): NotebookSummary {
     deletedAt: n.deletedAt,
     relation: n.folderRelation ?? n.conversation.relation, count: n.conversation.messages.length,
     analyzed: !!n.conversation.overview || Object.keys(n.conversation.lines).length > 0,
-    completed: n.conversation.completed };
+    completed: n.conversation.completed, ...(n.pinned ? { pinned: true } : {}), ...(n.tags?.length ? { tags: n.tags } : {}) };
 }
 export function moveNotebook(n: Notebook, relation: Relation, contact: string): Notebook {
   return { ...n, folderRelation: relation, contact: contact.trim().slice(0, 80) || n.contact,

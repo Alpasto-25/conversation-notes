@@ -15,13 +15,14 @@ function readView() {
   try { return parseFolderView(window.localStorage.getItem(FOLDER_VIEW_KEY)); }
   catch { return parseFolderView(null); }
 }
-export function ConversationFolders({ items, activeId, disabled, select, create, edit, move, moveTo, recycle, recycleMany, trashCount, openTrash, manageDisabled = disabled, compact = false }: {
+export function ConversationFolders({ items, activeId, disabled, select, create, edit, move, moveTo, recycle, recycleMany, trashCount, openTrash, manageDisabled = disabled, compact = false, searchMessages }: {
   items: NotebookSummary[]; activeId?: string; disabled: boolean; select: (id: string) => void;
   create: () => void; edit: (id: string) => void; recycle: (note: NotebookSummary) => void;
   recycleMany: (notes: NotebookSummary[]) => void;
   move: (notes: NotebookSummary[]) => void;
   moveTo: (notes: NotebookSummary[], scene: Relation, contact: string) => void;
   trashCount: number; openTrash: () => void; manageDisabled?: boolean; compact?: boolean;
+  searchMessages?: (query: string) => void;
 }) {
   const [search, setSearch] = useState(""), [view, setView] = useState(readView);
   const [searchCollapsed, setSearchCollapsed] = useState<string[]>([]);
@@ -53,6 +54,7 @@ export function ConversationFolders({ items, activeId, disabled, select, create,
     <div className="folder-toolbar"><strong>对话文件夹 <small>{items.length}</small></strong>
       <IconButton label="新建手记" disabled={disabled} onClick={create}><Plus size={18} strokeWidth={1.8} /></IconButton></div>
     <label className="folder-search"><Search size={14} strokeWidth={1.8} /><input aria-label="搜索手记" placeholder="搜索对象、手记或场景" value={search} onChange={(e) => { setSearch(e.target.value); setSearchCollapsed([]); }} /></label>
+    {searchMessages && <button className="text-button" disabled={disabled} onClick={() => searchMessages(search)}><Search size={14} /> 搜索聊天正文</button>}
     <div className="folder-controls">
       <ToggleSelect aria-label="手记排序" value={view.sort} onChange={value => update({ ...view, sort: value as FolderSort })}>
         <option value="updated">最近修改</option><option value="created">最近创建</option><option value="title">名称排序</option>
@@ -86,7 +88,7 @@ export function ConversationFolders({ items, activeId, disabled, select, create,
               hold={(event, activated) => drag.arm(n, event, activated)} dragging={drag.isDragging} cancelHold={drag.cancelPending}>
               {selection.managing && <label className="notebook-check"><input type="checkbox" aria-label={`选择手记：${n.title}`} checked={selection.checked(n.id)} disabled={manageDisabled} onChange={() => selection.toggle(n.id)} /></label>}
               <button className="notebook-entry" data-tooltip={n.title} aria-label={`${selection.managing ? "选择手记内容" : "打开手记"}：${n.title}`} aria-pressed={selection.managing ? selection.checked(n.id) : undefined} aria-current={!selection.managing && n.id === activeId ? "page" : undefined} disabled={selection.managing ? manageDisabled : disabled} onClick={() => selection.managing ? selection.toggle(n.id) : select(n.id)}>
-                <FileText size={16} strokeWidth={1.8} /><span><strong>{n.title}</strong><small>{n.count} 条 · {n.completed ? "分析已保存" : n.analyzed ? "部分分析已保存" : "待分析"}</small></span>
+                <FileText size={16} strokeWidth={1.8} /><span><strong>{n.pinned ? '置顶 · ' : ''}{n.title}</strong><small>{n.count} 条 · {n.completed ? "分析已保存" : n.analyzed ? "部分分析已保存" : "待分析"}</small></span>
               </button>
               {!selection.managing && <div className="notebook-actions">
                 <button className="icon" aria-label={`移动手记：${n.title}`} data-tooltip="移动" disabled={manageDisabled} onClick={() => move([n])}><FolderInput size={14} strokeWidth={1.8} /></button>

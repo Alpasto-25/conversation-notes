@@ -30,6 +30,7 @@ export type Judgment = {
   probabilities: Record<string, number>;
 };
 export type LineResult = Partial<SemanticFields> & {
+  analysisContext?: { hash: string; provider: string; model: string; rubric: string; task: Task; targetIds: string[]; fullScene: boolean; distant: boolean; at?: string; messageIds?: string[] };
   semanticJudgment?: JevSemanticJudgment;
   event?: { kind: MemoryEvent["kind"]; confidence: number };
   skipped?: string;

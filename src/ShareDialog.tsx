@@ -2,7 +2,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { Check, CheckCheck, ChevronLeft, ChevronRight, Download, Eye, FileText, Image, ListChecks, LoaderCircle, Share2, Square, X } from "lucide-react";
-import { exportNotes, isMobile } from "./platform";
+import { exportNotes, exportReport, exportImageArchive, isMobile } from "./platform";
+import { privateShareSource, DEFAULT_SHARE_PRIVACY } from './share-privacy';
+import { analysisReport } from './analysis-report';
+import { imageArchive } from './share-archive';
 import { ChatMessage } from "./ChatMessage";
 import { IconButton } from "./IconButton";
 import { lockOverlayBackground } from "./overlay-lock";
@@ -14,9 +17,11 @@ export type ShareDialogHandle = { back: () => boolean };
 type ImageSession = Awaited<ReturnType<typeof prepareImages>>;
 
 export function ShareDialog({ source, close, ref }: { source: ShareSource; close: () => void; ref?: Ref<ShareDialogHandle> }) {
-  const c = source.conversation, messages = c.messages;
+  const [privacy, setPrivacy] = useState(DEFAULT_SHARE_PRIVACY);
+  const previewSource = useMemo(() => privateShareSource(source, privacy), [source, privacy]);
+  const c = previewSource.conversation, messages = c.messages;
   const [selected, setSelected] = useState<string[]>([]), [selecting, setSelecting] = useState(false);
-  const [format, setFormat] = useState<"png" | "txt">("png"), [previewImage, setPreviewImage] = useState(false);
+  const [format, setFormat] = useState<"png" | "txt" | "report">("png"), [previewImage, setPreviewImage] = useState(false);
   const [cardPage, setCardPage] = useState(0), [pageCount, setPageCount] = useState(0), [image, setImage] = useState("");
   const [imageBusy, setImageBusy] = useState(false), [imageError, setImageError] = useState("");
   const [busy, setBusy] = useState(false), [notice, setNotice] = useState(""), [width, setWidth] = useState(0);
@@ -26,12 +31,14 @@ export function ShareDialog({ source, close, ref }: { source: ShareSource; close
   const panel = useRef<HTMLDivElement>(null), scroller = useRef<HTMLDivElement>(null), closeButton = useRef<HTMLButtonElement>(null);
   const session = useRef<ImageSession | null>(null), generation = useRef(0);
   const press = useRef<{ id: string; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null), ignoreClick = useRef("");
-  const text = useMemo(() => shareText(source, selected), [source, selected]);
+  const text = useMemo(() => shareText(previewSource, selected, false), [previewSource, selected]);
+  const report = useMemo(() => analysisReport(previewSource, selected), [previewSource, selected]);
+  const [batchProgress, setBatchProgress] = useState(''), batchCancelled = useRef(false);
   const virtual = useVirtualizer({ count: messages.length, getScrollElement: () => scroller.current,
     getItemKey: useCallback((index: number) => messages[index].id, [messages]), estimateSize: () => 150, overscan: 8 });
   const back = useCallback(() => {
     if (busy || closing) return true;
-    if (format === "txt" || previewImage) { setFormat("png"); setPreviewImage(false); }
+    if (format !== 'png' || previewImage) { setFormat("png"); setPreviewImage(false); }
     else if (selecting) { setSelecting(false); setSelected([]); }
     else dismiss();
     return true;
@@ -74,7 +81,7 @@ export function ShareDialog({ source, close, ref }: { source: ShareSource; close
     const timer = setTimeout(async () => {
       if (!selected.length || !width) return;
       try {
-        local = await prepareImages(source, selected, width);
+        local = await prepareImages(previewSource, selected, width);
         if (!live) { local.dispose(); return; }
         session.current = local;
         const data = await local.render(0);
@@ -83,7 +90,7 @@ export function ShareDialog({ source, close, ref }: { source: ShareSource; close
       finally { if (live && generation.current === current) setImageBusy(false); }
     }, 220);
     return () => { live = false; clearTimeout(timer); local?.dispose(); if (session.current === local) session.current = null; };
-  }, [source, selected, width, appearanceRevision]);
+  }, [previewSource, selected, width, appearanceRevision]);
   async function changePage(page: number) {
     if (!session.current || busy || imageBusy) return;
     const current = ++generation.current; setImageBusy(true); setImageError("");
@@ -94,10 +101,29 @@ export function ShareDialog({ source, close, ref }: { source: ShareSource; close
   async function output(share: boolean) {
     setBusy(true); setNotice(""); setNoticeError(false);
     try {
-      const result = await exportNotes(format, format === "png" ? image : text, cardPage + 1, share);
-      setNotice(result.cancelled ? "已取消" : result.opened ? "已打开系统分享" : "已保存");
+      const result = format === 'report' ? await exportReport(report) : await exportNotes(format, format === "png" ? image : text, cardPage + 1, share);
+      setNotice(result.cancelled ? "已取消" : 'opened' in result && result.opened ? "已打开系统分享" : "已保存");
     } catch (error) { setNoticeError(true); setNotice(error instanceof Error ? error.message : "导出失败，请重试。"); }
     finally { setBusy(false); }
+  }
+  async function saveAllImages() {
+    const current = session.current; if (!current || busy) return;
+    setBusy(true); setNotice(''); setNoticeError(false); batchCancelled.current = false;
+    try {
+      const entries: { name: string; bytes: Uint8Array }[] = []; let total = 0;
+      for (let page = 0; page < current.pages.length; page++) {
+        if (batchCancelled.current) throw new Error('已取消生成，尚未保存图片包。');
+        setBatchProgress(`正在生成图片 ${page + 1}/${current.pages.length}…`);
+        const data = await current.render(page), bytes = Uint8Array.from(atob(data.split(',')[1]), char => char.charCodeAt(0));
+        total += bytes.length; if (total > 64 * 1024 * 1024) throw new Error('图片包超过 64 MB，请减少所选消息。');
+        entries.push({ name: `page-${String(page + 1).padStart(3, '0')}.png`, bytes });
+      }
+      if (batchCancelled.current) throw new Error('已取消生成，尚未保存图片包。');
+      setBatchProgress('正在保存全部图片…');
+      const result = await exportImageArchive(imageArchive(entries));
+      setNotice(result.cancelled ? '已取消保存图片包。' : `已保存全部 ${entries.length} 张图片的 ZIP 文件。`);
+    } catch (e) { setNoticeError(true); setNotice((e as Error).message); }
+    finally { setBusy(false); setBatchProgress(''); }
   }
   return createPortal(<div className={`share-fullscreen${closing ? " is-closing" : ""}`} inert={closing} ref={panel} role="dialog" aria-modal="true" aria-label="分享对话片段">
     <header className="share-head">
@@ -136,23 +162,34 @@ export function ShareDialog({ source, close, ref }: { source: ShareSource; close
       </div>
       {format === "png" && previewImage && <div className="share-image-view">{image && <img src={image} alt={`分享图片 ${cardPage + 1}/${pageCount}`} />}</div>}
       {format === "txt" && <textarea className="share-text-preview" aria-label="分享文本预览" value={text} readOnly />}
+      {format === 'report' && <textarea className="share-text-preview" aria-label="分析报告预览" value={report} readOnly />}
     </div>
     <footer className="share-footer">
+      <details className="share-privacy"><summary>分享脱敏与导出检查</summary>
+        <label><input type="checkbox" checked={privacy.aliases} disabled={busy} onChange={e => setPrivacy({ ...privacy, aliases: e.target.checked })} /> 昵称替换为我 / 对方</label>
+        <label><input type="checkbox" checked={privacy.contacts} disabled={busy} onChange={e => setPrivacy({ ...privacy, contacts: e.target.checked })} /> 隐藏手机号和邮箱</label>
+        <label><input type="checkbox" checked={privacy.hideTime} disabled={busy} onChange={e => setPrivacy({ ...privacy, hideTime: e.target.checked })} /> 隐藏消息时间</label>
+        <label className="field">额外隐藏的文字（每行一个）<textarea aria-label="自定义脱敏文字" value={privacy.replacements} disabled={busy} onChange={e => setPrivacy({ ...privacy, replacements: e.target.value })} /></label>
+        <p>只修改导出副本。请检查图片、文本或报告预览，自动规则无法识别所有个人信息。</p>
+      </details>
       <div className="share-actions">
         <IconButton label="图片" aria-pressed={format === "png"} disabled={busy} onClick={() => { setFormat("png"); setPreviewImage(false); }}><Image size={20} /></IconButton>
         <IconButton label="TXT 文本" aria-pressed={format === "txt"} disabled={busy || !selected.length} onClick={() => setFormat("txt")}><FileText size={20} /></IconButton>
+        <IconButton label="分析报告（含总览）" aria-pressed={format === 'report'} disabled={busy || !selected.length} onClick={() => setFormat('report')}><ListChecks size={20} /></IconButton>
         {format === "png" && <IconButton label={previewImage ? "返回聊天预览" : "预览所选图片"} aria-pressed={previewImage} disabled={busy || !image || imageBusy} onClick={() => setPreviewImage(!previewImage)}><Eye size={20} /></IconButton>}
         <span className="share-action-spacer" />
         {format === "png" && pageCount > 1 && <div className="share-pagination">
           <IconButton label="上一张图片" disabled={busy || imageBusy || !cardPage} onClick={() => void changePage(cardPage - 1)}><ChevronLeft size={18} /></IconButton>
           <span>{cardPage + 1}/{pageCount}</span><IconButton label="下一张图片" disabled={busy || imageBusy || cardPage + 1 >= pageCount} onClick={() => void changePage(cardPage + 1)}><ChevronRight size={18} /></IconButton>
         </div>}
-        <IconButton label={format === "png" ? "保存图片" : "保存 TXT"} className="primary" disabled={busy || !selected.length || (format === "png" && (imageBusy || !image || !!imageError))} onClick={() => void output(false)}>
+        <IconButton label={format === "png" ? "保存图片" : format === 'report' ? '保存分析报告' : "保存 TXT"} className="primary" disabled={busy || !selected.length || (format === "png" && (imageBusy || !image || !!imageError))} onClick={() => void output(false)}>
           {busy ? <LoaderCircle className="spin" size={20} /> : <Download size={20} />}
         </IconButton>
-        {isMobile && <IconButton label={format === "png" ? "分享图片" : "分享文本"} disabled={busy || !selected.length || (format === "png" && (imageBusy || !image || !!imageError))} onClick={() => void output(true)}><Share2 size={20} /></IconButton>}
+        {isMobile && format !== 'report' && <IconButton label={format === "png" ? "分享图片" : "分享文本"} disabled={busy || !selected.length || (format === "png" && (imageBusy || !image || !!imageError))} onClick={() => void output(true)}><Share2 size={20} /></IconButton>}
       </div>
-      <p className="share-hint">{format === "txt" ? "TXT 适合交给其他 AI 做深入分析。" : !selecting ? "长按选择 · 点按可多选或取消" : imageBusy ? "正在生成图片…" : pageCount > 1 ? "长内容已分页，保存或分享当前图片。" : "仅分享所选消息和已有分析。"}</p>
+      {format === 'png' && pageCount > 1 && <button className="secondary" disabled={busy || imageBusy || !!imageError} onClick={() => void saveAllImages()}>保存全部 {pageCount} 张图片（ZIP）</button>}
+      {batchProgress && <p role="status">{batchProgress}<button className="text-button" onClick={() => { batchCancelled.current = true; }}>取消生成</button></p>}
+      <p className="share-hint">{format === 'report' ? '报告包含总览与所选逐句原文，保存为 Markdown。' : format === "txt" ? "TXT 适合交给其他 AI 做深入分析。" : !selecting ? "长按选择 · 点按可多选或取消" : imageBusy ? "正在生成图片…" : pageCount > 1 ? "长内容已分页，可保存当前图片或全部打包。" : "仅分享所选消息和已有分析。"}</p>
       {(notice || imageError) && <p className={`share-notice${noticeError || imageError ? " error" : ""}`} role={noticeError || imageError ? "alert" : "status"}>{imageError || notice}</p>}
     </footer>
   </div>, document.body);

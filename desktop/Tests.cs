@@ -44,6 +44,22 @@ namespace ConversationNotes
         }
         private static async Task Run(string folder)
         {
+            using (BackupExport backup = new BackupExport()) {
+                foreach (string invalid in new[] { "../private.json", "conversation-notes-backup-20261021-120000.json.exe", "other.zip" })
+                    Reject(() => backup.Begin(new Dictionary<string, object> { { "name", invalid }, { "size", 1 } }), 400, "backup rejects foreign names and paths");
+                Reject(() => backup.Begin(new Dictionary<string, object> { { "name", "conversation-notes-backup-20261021-120000.json" }, { "size", 64 * 1024 * 1024 + 1 } }), 400, "backup bounds total size");
+                byte[] backupBytes = new byte[1800000]; for (int i = 0; i < backupBytes.Length; i++) backupBytes[i] = (byte)(i % 251);
+                string token = Json.Text(Json.Decode(Json.Encode(backup.Begin(new Dictionary<string, object> { { "name", "conversation-notes-backup-20261021-120000.json" }, { "size", backupBytes.Length } }))), "token");
+                Reject(() => backup.Chunk(new Dictionary<string, object> { { "token", token }, { "index", 1 }, { "data", "YQ==" } }), 400, "backup rejects reordered chunks");
+                using (MemoryStream incomplete = new MemoryStream()) Reject(() => backup.WriteTo(incomplete), 400, "backup refuses partial files");
+                for (int offset = 0, index = 0; offset < backupBytes.Length; offset += 196608, index++) {
+                    int count = Math.Min(196608, backupBytes.Length - offset);
+                    backup.Chunk(new Dictionary<string, object> { { "token", token }, { "index", index }, { "data", Convert.ToBase64String(backupBytes, offset, count) } });
+                }
+                using (MemoryStream complete = new MemoryStream()) { backup.WriteTo(complete); Check(Convert.ToBase64String(complete.ToArray()) == Convert.ToBase64String(backupBytes), "backup preserves more than 1.4MB byte for byte"); }
+                backup.Cancel(new Dictionary<string, object> { { "token", token } });
+                Reject(() => backup.Chunk(new Dictionary<string, object> { { "token", token }, { "index", 0 }, { "data", "YQ==" } }), 400, "backup cancellation invalidates token");
+            }
             Dictionary<string, object> export = new Dictionary<string, object> { { "action", "save" }, { "format", "txt" }, { "name", "conversation-notes-20261005-173000.txt" }, { "data", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes("合成对话片段\n已有分析 👋")) } };
             Check(System.Text.Encoding.UTF8.GetString(NoteExport.Decode(export)) == "合成对话片段\n已有分析 👋", "TXT export preserves UTF-8 and newlines");
             foreach (string invalidName in new[] { "../config.dpapi", "C:\\private.txt", "conversation-notes-20261005-173000.png", "conversation-notes-20261005-173000.txt.exe" }) {

@@ -1,7 +1,7 @@
 import { expressionStrategies } from '../shared/semantic-display';
 import type { LineResult, Message } from '../shared/types';
 
-export function SemanticDetail({ result, messages }: { result?: LineResult; messages: Message[] }) {
+export function SemanticDetail({ result, messages, locate }: { result?: LineResult; messages: Message[]; locate?: (id: string) => void }) {
   if (result?.communicationStrategies === undefined && !result?.subtext) return null;
   const strategies = expressionStrategies(result.communicationStrategies);
   return <>
@@ -18,7 +18,7 @@ export function SemanticDetail({ result, messages }: { result?: LineResult; mess
       <p className="semantic-explanation"><strong>{result.subtext}</strong></p>
       {!!result.semanticEvidenceIds?.length && <details className="semantic-evidence"><summary>查看上下文依据</summary>
         {result.semanticEvidenceIds.map(id => messages.find(m => m.id === id)).filter((m): m is Message => !!m)
-          .map(message => <blockquote key={message.id}>{message.text}</blockquote>)}
+          .map(message => <blockquote key={message.id}>{message.text}{locate && <button className="text-button" onClick={() => locate(message.id)}>定位依据原话</button>}</blockquote>)}
       </details>}
     </>}
   </>;

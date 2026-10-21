@@ -7,6 +7,18 @@ import { addUsage, combineAnalysisUsage, type AnalysisUsage } from '../shared/us
 import { IDBFactory } from 'fake-indexeddb';
 import { createNotebookStore } from '../src/storage';
 
+test('未知请求跨运行汇总且持久化后保留，不当作零费用', async () => {
+  const { newNotebook } = await import('../src/notebooks');
+  const run: AnalysisUsage = { run_id: 'unfinished', input_tokens: 0, output_tokens: 0, requests: 0, local_targets: 0, elapsed_ms: 1, unreported_batches: 1 };
+  const sum = combineAnalysisUsage([run, run, { ...run, run_id: 'supplement' }])!;
+  assert.equal(sum.unreported_batches, 2); assert.equal(sum.requests, 0);
+  const store = createNotebookStore(new IDBFactory()), note = newNotebook();
+  note.runHistory = [run]; note.conversation.analysisUsage = run;
+  await store.save(note);
+  assert.equal((await store.load(note.id))!.runHistory![0].unreported_batches, 1);
+  await store.close();
+});
+
 test('统一用量合计基础与补充请求，保留任务明细和未知缓存数', () => {
   const primary: AnalysisUsage = { input_tokens: 100, output_tokens: 20, requests: 1, model: 'jev-1.13.0', run_id: 'primary',
     local_targets: 2, elapsed_ms: 400, started_at: '2026-10-06T01:00:00.000Z', finished_at: '2026-10-06T01:00:00.400Z' };

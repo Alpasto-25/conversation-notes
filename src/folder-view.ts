@@ -15,7 +15,7 @@ export function parseFolderView(raw: string | null): FolderView {
 }
 export function visibleNotebooks(items: NotebookSummary[], query: string, sort: FolderSort): NotebookSummary[] {
   const text = query.trim().toLocaleLowerCase();
-  return items.filter((n) => `${n.title} ${n.contact} ${RELATIONS[n.relation]}`.toLocaleLowerCase().includes(text))
-    .sort((a, b) => sort === "title" ? a.title.localeCompare(b.title, "zh-CN") || a.id.localeCompare(b.id)
-      : (sort === "created" ? b.createdAt.localeCompare(a.createdAt) : b.updatedAt.localeCompare(a.updatedAt)) || a.id.localeCompare(b.id));
+  return items.filter((n) => `${n.title} ${n.contact} ${RELATIONS[n.relation]} ${(n.tags ?? []).join(' ')}`.toLocaleLowerCase().includes(text))
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || (sort === "title" ? a.title.localeCompare(b.title, "zh-CN") || a.id.localeCompare(b.id)
+      : (sort === "created" ? b.createdAt.localeCompare(a.createdAt) : b.updatedAt.localeCompare(a.updatedAt)) || a.id.localeCompare(b.id)));
 }

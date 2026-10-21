@@ -32,6 +32,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -65,6 +66,10 @@ public final class MainActivity extends Activity {
     private static final String IMPORT_KEY = "conversation-notes-usb-v1";
     private static final int FILE_PICKER = 410;
     private static final int EXPORT_PICKER = 411;
+    private static final int BACKUP_PICKER = 412;
+    private final BackupTransfer backups = new BackupTransfer();
+    private String pendingBackupId;
+    private File pendingBackupFile;
     private String pendingExportId;
     private ExportData pendingExport;
     private static final String RELEASE_API = "https://api.github.com/repos/Alpasto-25/conversation-notes/releases/latest";
@@ -199,6 +204,24 @@ public final class MainActivity extends Activity {
     @Override public void onBackPressed() { handleBack(); }
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == BACKUP_PICKER && pendingBackupId != null) {
+            final String id=pendingBackupId; final File file=pendingBackupFile;
+            pendingBackupId=null; pendingBackupFile=null;
+            final Uri uri=result==RESULT_OK && data!=null ? data.getData() : null;
+            workers.execute(() -> {
+                try {
+                    if(uri==null) deliver(id,true,new JSONObject().put("cancelled",true));
+                    else {
+                        if(!"content".equals(uri.getScheme())) throw new Exception("Invalid document");
+                        try(InputStream input=new FileInputStream(file); OutputStream output=getContentResolver().openOutputStream(uri,"wt")) {
+                            if(output==null) throw new Exception("Document unavailable");
+                            byte[] buffer=new byte[65536]; int count; while((count=input.read(buffer))!=-1) output.write(buffer,0,count);
+                        }
+                        deliver(id,true,new JSONObject().put("saved",true));
+                    }
+                } catch(Exception ignored) { exportError(id); } finally { if(file!=null) file.delete(); }
+            });
+        }
         if (request == EXPORT_PICKER && pendingExportId != null) {
             final String id=pendingExportId; final ExportData export=pendingExport;
             pendingExportId=null; pendingExport=null;
@@ -226,6 +249,7 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         destroyed = true;
         pendingExport=null; pendingExportId=null;
+        backups.close(); if(pendingBackupFile!=null) pendingBackupFile.delete(); pendingBackupFile=null; pendingBackupId=null;
         try { if (provisionSocket != null) provisionSocket.close(); } catch (Exception ignored) {}
         for (HttpURLConnection connection : connections.values()) connection.disconnect();
         workers.shutdownNow();
@@ -538,6 +562,24 @@ public final class MainActivity extends Activity {
                 try {
                     if (cancelled.contains(id)) return;
                     JSONObject input = new JSONObject(raw), result;
+                    if (method.equals("backupBegin")) {
+                        if(pendingBackupId!=null) throw new ApiException(409,"请先关闭备份保存窗口。");
+                        deliver(id,true,new JSONObject().put("token",backups.begin(getCacheDir(),input.optString("name"),input.optLong("size",-1)))); return;
+                    }
+                    if (method.equals("backupChunk")) { backups.chunk(input.optString("token"),input.optInt("index",-1),input.optString("data")); deliver(id,true,new JSONObject().put("saved",true)); return; }
+                    if (method.equals("backupCancel")) { backups.cancel(input.optString("token")); deliver(id,true,new JSONObject().put("cancelled",true)); return; }
+                    if (method.equals("backupSave")) {
+                        final File completed=backups.finish(input.optString("token")); final String filename=backups.name();
+                        runOnUiThread(() -> {
+                            if(destroyed) { completed.delete(); return; }
+                            try {
+                                if(pendingBackupId!=null) throw new Exception("Backup picker already open");
+                                pendingBackupId=id; pendingBackupFile=completed;
+                                String mime=filename.endsWith(".zip") ? "application/zip" : filename.endsWith(".md") ? "text/markdown" : "application/json";
+                                startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime).putExtra(Intent.EXTRA_TITLE,filename),BACKUP_PICKER);
+                            } catch(Exception ignored) { pendingBackupId=null; pendingBackupFile=null; completed.delete(); exportError(id); }
+                        }); return;
+                    }
                     if (method.equals("exportNotes")) {
                         ExportData data;
                         try { data=ExportData.decode(input.optString("action"),input.optString("format"),input.optString("name"),input.optString("data")); }
@@ -611,7 +653,10 @@ public final class MainActivity extends Activity {
             });
         }
         @JavascriptInterface public void cancel(String id) {
-            runOnUiThread(() -> { if (id.equals(pendingExportId)) { pendingExportId=null; pendingExport=null; } });
+            runOnUiThread(() -> {
+                if (id.equals(pendingExportId)) { pendingExportId=null; pendingExport=null; }
+                if (id.equals(pendingBackupId)) { if(pendingBackupFile!=null) pendingBackupFile.delete(); pendingBackupFile=null; pendingBackupId=null; }
+            });
             if (!jobs.contains(id)) return;
             cancelled.add(id);
             HttpURLConnection connection = connections.get(id);

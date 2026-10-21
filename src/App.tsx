@@ -1,5 +1,16 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useNotebooks } from "./useNotebooks";
+import { BackupPanel } from './BackupPanel';
+import { AnalysisPlan } from './AnalysisPlan';
+import { AnalysisHistory } from './AnalysisHistory';
+import { UsageHistory } from './UsageHistory';
+import { ImportReview } from './ImportReview';
+import { NotebookInsights } from './NotebookInsights';
+import { AnalysisTimeline } from './AnalysisTimeline';
+import { parseChatAsync } from './parse-chat';
+import { MAX_IMPORT_BYTES, MAX_IMPORT_CHARS, selectedImport, type ImportSelection } from './import-review';
+import { MessageSearch } from './MessageSearch';
+import type { MessageHit } from './message-search';
 import { ConversationFolders } from "./ConversationFolders";
 import { NotebookTrash } from "./NotebookTrash";
 import { MoveNotebook } from "./MoveNotebook";
@@ -29,6 +40,7 @@ import {
   useRef,
   useState,
   useCallback,
+  useMemo,
   type ReactNode,
 } from "react";
 import {
@@ -61,8 +73,10 @@ import {
   CircleAlert,
   Square,
   ArrowLeft,
+  Search,
+  ListChecks,
 } from "lucide-react";
-import { parseChat, toMessages, mergeMessages } from "../shared/parser";
+import { toMessages, mergeMessages } from "../shared/parser";
 import {
   ACTIONS,
   RELATIONS,
@@ -185,10 +199,22 @@ export default function App() {
   const updates = useUpdates();
   const appearance = useAppearance();
   const [appearanceOpen, setAppearanceOpen] = useState(false);
+  const [backupOpen, setBackupOpen] = useState(false), [backupBusy, setBackupBusy] = useState(false), [backupScope, setBackupScope] = useState('all');
   const [usageOpen, setUsageOpen] = useState(false);
   const [analysisSettingsOpen, setAnalysisSettingsOpen] = useState(false);
   const [reanalyzeOpen, setReanalyzeOpen] = useState(false);
-  const [pendingImportAnalysis, setPendingImportAnalysis] = useState<{ notebookId: string; messages: Message[]; relation: Relation } | null>(null);
+  const [analysisConfirm, setAnalysisConfirm] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [insightsOpen, setInsightsOpen] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState<{ notebookId: string; messageId?: string } | null>(null);
+  const [analysisTargets, setAnalysisTargets] = useState<string[]>([]), [analysisSupplement, setAnalysisSupplement] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null), [messageText, setMessageText] = useState(''), [messageSender, setMessageSender] = useState<Message['sender']>('self');
+  const [rangeOpen, setRangeOpen] = useState(false), [rangeStart, setRangeStart] = useState(1), [rangeEnd, setRangeEnd] = useState(1), [rangeDeleting, setRangeDeleting] = useState(false);
+  const [searchOpen, setSearchOpen] = useState<{ query: string; notebookId?: string } | null>(null);
+  const [searchSession, setSearchSession] = useState<{ hits: MessageHit[]; query: string; index: number } | null>(null);
+  const [pendingJump, setPendingJump] = useState<{ notebookId: string; messageId: string; offset?: number; highlight?: boolean } | null>(null);
+  const [highlightedId, setHighlightedId] = useState('');
+  const [pendingImportAnalysis, setPendingImportAnalysis] = useState<{ notebookId: string; messages: Message[]; relation: Relation; fresh?: boolean; supplement?: boolean } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const drawer = useRef<MobileDrawerHandle>(null);
@@ -214,6 +240,11 @@ export default function App() {
     [detail, setDetail] = useState<string | null>(null),
     [notice, setNotice] = useState("");
   const [overlap, setOverlap] = useState<Message[] | null>(null);
+  const [importParsing, setImportParsing] = useState(false), [importDirty, setImportDirty] = useState(false);
+  const parsingController = useRef<AbortController | null>(null);
+  const [importSelection, setImportSelection] = useState<ImportSelection>({ start: 1, end: Number.MAX_SAFE_INTEGER, from: '', to: '' });
+  const importParsed = useMemo(() => selectedImport(parsed, importSelection), [parsed, importSelection]);
+  const importMessages = useMemo(() => toMessages(importParsed, role), [importParsed, role]);
   const [apiInfo, setApiInfo] = useState<ApiStatus | null>(null);
   const [settingsSelection, setSettingsSelection] = useState<ModelSelection>();
   useEffect(() => { if (!settings) setSettingsSelection(undefined); }, [settings]);
@@ -226,8 +257,8 @@ export default function App() {
     setOnboarding(false);
   };
   const canShowUpdatePrompt = ready && a.status !== "loading" && !switching &&
-    !menuOpen && !onboarding && !appearanceOpen && !updatesOpen && !settings && !analysisSettingsOpen && !reanalyzeOpen && !pendingImportAnalysis && !importing && !detail &&
-    !libraryOpen && !editingNotebook && !trashOpen && !notebookDelete && !messageDelete && !movingNotes && !shareSource && !overlap && !usageOpen;
+    !menuOpen && !onboarding && !appearanceOpen && !backupOpen && !historyOpen && !updatesOpen && !settings && !analysisSettingsOpen && !reanalyzeOpen && !analysisConfirm && !pendingImportAnalysis && !importing && !detail &&
+    !libraryOpen && !editingNotebook && !editingMessage && !rangeOpen && !insightsOpen && !pendingNavigation && !trashOpen && !notebookDelete && !messageDelete && !movingNotes && !shareSource && !searchOpen && !overlap && !usageOpen;
   const installedUpdatePrompt = updates.showInstalledChanges && canShowUpdatePrompt;
   const updatePrompt = updates.showReminder && !updates.showInstalledChanges && canShowUpdatePrompt;
   useEffect(() => {
@@ -252,8 +283,10 @@ export default function App() {
   useEffect(() => {
     if (!pendingImportAnalysis || !ready || switching) return;
     setPendingImportAnalysis(null);
-    if (!storageError && notebooks.active?.id === pendingImportAnalysis.notebookId && messages === pendingImportAnalysis.messages && relation === pendingImportAnalysis.relation)
-      void a.run(messages, relation);
+    if (!storageError && notebooks.active?.id === pendingImportAnalysis.notebookId && messages === pendingImportAnalysis.messages && relation === pendingImportAnalysis.relation) {
+      if (pendingImportAnalysis.supplement) void a.supplementOnly(messages, relation);
+      else void a.run(messages, relation, pendingImportAnalysis.fresh);
+    }
   }, [pendingImportAnalysis, ready, switching, storageError, notebooks.active?.id, messages, relation]);
   const scroller = useRef<HTMLDivElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -274,16 +307,65 @@ export default function App() {
       virtual.scrollToIndex(messages.length - 1, { align: "end" });
   }, [messages.length]);
   useEffect(() => {
+    const anchor = notebooks.active?.reading;
+    if (pendingJump?.notebookId === notebooks.active?.id) return;
+    if (anchor && notebooks.active) setPendingJump({ notebookId: notebooks.active.id, messageId: anchor.messageId, offset: anchor.offset });
+  }, [notebooks.active?.id]);
+  useEffect(() => {
+    if (!pendingJump || pendingJump.notebookId !== notebooks.active?.id || switching) return;
+    const index = messages.findIndex(m => m.id === pendingJump.messageId);
+    if (index < 0) { setPendingJump(null); return; }
+    stay.current = false;
+    let frame = 0, passes = 0;
+    const locate = () => {
+      virtual.scrollToIndex(index, { align: pendingJump.offset === undefined ? 'center' : 'start', behavior: 'auto' });
+      const node = document.getElementById(`message-${pendingJump.messageId}`);
+      if (node && pendingJump.offset !== undefined && scroller.current) scroller.current.scrollTop += node.getBoundingClientRect().top - scroller.current.getBoundingClientRect().top + pendingJump.offset;
+      if (++passes < 8) frame = requestAnimationFrame(locate);
+      else { if (pendingJump.highlight) setHighlightedId(pendingJump.messageId); setPendingJump(null); }
+    };
+    frame = requestAnimationFrame(locate);
+    return () => cancelAnimationFrame(frame);
+  }, [pendingJump, notebooks.active?.id, messages, switching]);
+  useEffect(() => { if (!highlightedId) return; const timer = setTimeout(() => setHighlightedId(''), 3000); return () => clearTimeout(timer); }, [highlightedId]);
+  async function navigateMessage(hit: MessageHit) {
+    if (notebooks.active?.id !== hit.notebookId && a.status === 'loading') { setPendingNavigation({ notebookId: hit.notebookId, messageId: hit.messageId }); return; }
+    if (notebooks.active?.id !== hit.notebookId && !await notebooks.select(hit.notebookId)) return;
+    setPendingJump({ notebookId: hit.notebookId, messageId: hit.messageId, highlight: true });
+  }
+  function cycleSearch(delta: number) {
+    if (!searchSession?.hits.length) return;
+    const index = (searchSession.index + delta + searchSession.hits.length) % searchSession.hits.length;
+    setSearchSession({ ...searchSession, index }); void navigateMessage(searchSession.hits[index]);
+  }
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'f' && !document.querySelector('.overlay')) {
+        event.preventDefault(); setSearchOpen({ query: '', notebookId: event.shiftKey ? undefined : notebooks.active?.id });
+      }
+      if (event.key === 'F3' && searchSession && !document.querySelector('.overlay')) { event.preventDefault(); cycleSearch(event.shiftKey ? -1 : 1); }
+    };
+    window.addEventListener('keydown', key); return () => window.removeEventListener('keydown', key);
+  }, [notebooks.active?.id, searchSession]);
+  useEffect(() => {
     window.__notebookBack = () => {
       if (dismissNotebookDrag()) return true;
       if (dismissSelect()) return true;
       if (installedUpdatePrompt) { updates.acknowledgeInstalledChanges(); return true; }
       if (updatePrompt) { updates.snooze(); return true; }
       if (usageOpen) { setUsageOpen(false); return true; }
+      if (historyOpen) { setHistoryOpen(false); return true; }
+      if (insightsOpen) { setInsightsOpen(false); return true; }
+      if (pendingNavigation) { setPendingNavigation(null); return true; }
+      if (searchOpen) { setSearchOpen(null); return true; }
+      if (backupOpen) { if (!backupBusy) setBackupOpen(false); return true; }
       if (reanalyzeOpen) { setReanalyzeOpen(false); return true; }
+      if (analysisConfirm) { setAnalysisConfirm(false); return true; }
       if (analysisSettingsOpen) { setAnalysisSettingsOpen(false); return true; }
       if (appearanceOpen) { setAppearanceOpen(false); return true; }
       if (messageDelete) { setMessageDelete(null); return true; }
+      if (editingMessage) { setEditingMessage(null); return true; }
+      if (rangeOpen) { setRangeOpen(false); return true; }
       if (notebookDelete) { setNotebookDelete(null); return true; }
       if (movingNotes) { setMovingNotes(null); return true; }
       if (shareSource) { return sharePreview.current?.back() ?? true; }
@@ -318,8 +400,8 @@ export default function App() {
     return () => {
       delete window.__notebookBack;
     };
-  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, usageOpen, analysisSettingsOpen, reanalyzeOpen, updatePrompt, installedUpdatePrompt, updates.acknowledgeInstalledChanges, updates.snooze, libraryOpen, editingNotebook, trashOpen, notebookDelete, messageDelete, movingNotes, shareSource, closeMenu, reading.expanded, reading.close]);
-  const busy = a.status === "loading" || switching,
+  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, backupOpen, backupBusy, usageOpen, historyOpen, insightsOpen, pendingNavigation, searchOpen, analysisSettingsOpen, reanalyzeOpen, analysisConfirm, updatePrompt, installedUpdatePrompt, updates.snooze, updates.acknowledgeInstalledChanges, libraryOpen, editingNotebook, editingMessage, rangeOpen, trashOpen, notebookDelete, messageDelete, movingNotes, shareSource, closeMenu, reading.expanded, reading.close]);
+  const busy = a.status === "loading" || switching || importParsing,
     ov = a.overview,
     value = ov?.affinity.value,
     quality = meanQuality(messages, a.lines);
@@ -331,14 +413,24 @@ export default function App() {
     a.status === "complete" && last?.value != null && previous?.value != null
       ? last.value - previous.value
       : null;
-  function start(ms: Message[]) {
+  async function start(ms: Message[]) {
+    const note = await notebooks.checkpointAnalysis('追加分析前'); if (!note) return;
     setMessages(ms);
     setInput("");
-    a.run(ms, relation);
+    setPendingImportAnalysis({ notebookId: note.id, messages: ms, relation });
   }
+  async function beginCurrentAnalysis(fresh = false, supplement = false) {
+    const note = await notebooks.checkpointAnalysis(fresh ? '重新分析前' : supplement ? '补充分析前' : '继续分析前');
+    if (note) setPendingImportAnalysis({ notebookId: note.id, messages: note.conversation.messages, relation: note.conversation.relation, fresh, supplement });
+  }
+  function requestAnalysis(ids: string[] = [], supplement = false) { setAnalysisTargets(ids); setAnalysisSupplement(supplement); setAnalysisConfirm(true); }
+  function locateCurrentMessage(messageId: string) { setDetail(null); if (notebooks.active) setPendingJump({ notebookId: notebooks.active.id, messageId, highlight: true }); }
+  function openMessageEdit(message: Message) { setDetail(null); setEditingMessage(message); setMessageText(message.text); setMessageSender(message.sender); }
+  const validRange = Number.isInteger(rangeStart) && Number.isInteger(rangeEnd) && rangeStart >= 1 && rangeEnd >= rangeStart && rangeEnd <= messages.length;
+  const rangeIds = validRange ? messages.slice(rangeStart - 1, rangeEnd).map(m => m.id) : [];
   async function importFile(file: File) {
-    if (file.size > 1000000) {
-      setNotice("文本文件超过 1 MB，请分成较小的片段导入。");
+    if (file.size > MAX_IMPORT_BYTES) {
+      setNotice('文本文件超过 8 MB，请按日期分文件导入。');
       return;
     }
     try {
@@ -358,6 +450,7 @@ export default function App() {
   }
   function add(ms: Message[], mode: "auto" | "append" | "skip" = "auto") {
     const m = mergeMessages(messages, ms, mode);
+    if (m.messages.length > 100_000) { setNotice('单份手记最多 10 万条消息，请缩小导入范围或另建手记。'); return; }
     if (m.ambiguous) {
       setOverlap(ms);
       return;
@@ -370,27 +463,23 @@ export default function App() {
     setNotice("");
     start(m.messages);
   }
-  function prepare(text: string, separate = false, title = "") {
+  async function prepare(text: string, separate = false, title = "") {
     if (!ready || busy || storageError) return;
     if (!text.trim()) return;
-    if (text.length > 250000) {
-      setNotice("这次粘贴超过25万字符，请分几次追加；历史记录不会被截断。");
+    if (text.length > MAX_IMPORT_CHARS) {
+      setNotice('这次文字超过 800 万字符，请按日期分段导入。');
       return;
     }
-    const p = parseChat(text);
+    parsingController.current?.abort();
+    const controller = new AbortController(); parsingController.current = controller; setImportParsing(true);
+    let p: Awaited<ReturnType<typeof parseChatAsync>>;
+    try { p = await parseChatAsync(text, controller.signal); }
+    catch (e) { setNotice(controller.signal.aborted ? '已取消识别，现有手记未修改。' : (e as Error).message); return; }
+    finally { if (parsingController.current === controller) { parsingController.current = null; setImportParsing(false); } }
     const names = [...new Set(p.messages.map((x) => x.speaker))];
-    if (
-      messages.length &&
-      !separate &&
-      self &&
-      !p.warnings.length &&
-      names.every((n) => n === self || n === other)
-    ) {
-      add(toMessages(p.messages, self));
-      return;
-    }
     setRaw(text);
     setParsed(p.messages);
+    setImportDirty(false); setImportSelection({ start: 1, end: p.messages.length, from: '', to: '' });
     setRole(names.includes(self) ? self : names.includes("我") ? "我" : "");
     setImportScene(relation);
     const fillCurrent = notebooks.canFill(text);
@@ -400,9 +489,10 @@ export default function App() {
     setImporting(true);
   }
   async function confirmImport(analyze = true) {
-    const names = [...new Set(parsed.map((x) => x.speaker))];
+    if (importTooMany) return;
+    const names = [...new Set(importParsed.map((x) => x.speaker))];
     const nextOther = names.find((n) => n !== role) || "对方";
-    const imported = toMessages(parsed, role);
+    const imported = importMessages;
     if (importTarget === "append" && canAppend) {
       setImporting(false);
       if (analyze) add(imported);
@@ -428,8 +518,15 @@ export default function App() {
     setAnalysisSettingsOpen(false); setReanalyzeOpen(false); setPendingImportAnalysis(null);
     stay.current = true;
   }
-  async function createNotebook() { if (await notebooks.create()) resetViews(); }
-  async function selectNotebook(id: string) { if (id === notebooks.active?.id) { setLibraryOpen(false); return; } if (await notebooks.select(id)) resetViews(); }
+  async function createNotebook() {
+    if (a.status === 'loading') { setPendingNavigation({ notebookId: '__new__' }); return; }
+    if (await notebooks.create()) resetViews();
+  }
+  async function selectNotebook(id: string) {
+    if (id === notebooks.active?.id) { setLibraryOpen(false); return; }
+    if (a.status === 'loading') { setPendingNavigation({ notebookId: id }); return; }
+    if (await notebooks.select(id)) resetViews();
+  }
   async function editNotebook(id = notebooks.active?.id) {
     if (!id) return;
     const note = id === notebooks.active?.id ? notebooks.active : await notebooks.select(id);
@@ -452,7 +549,7 @@ export default function App() {
   }
   async function confirmMessageDelete() {
     if (!messageDelete || !await notebooks.deleteMessages([messageDelete.id])) return;
-    setMessageDelete(null); setDetail(null); setNotice("消息已删除。为避免使用已删除的上下文，该手记的旧分析已清除；需要时再点击继续分析。");
+    setMessageDelete(null); setDetail(null); setNotice('消息已删除，可撤销最近一次修改。依赖变化的结果已清除，需要时继续分析。');
   }
   const openTrash = () => setTrashOpen(true);
   async function recoverNotebooks(notes: NotebookSummary[]) {
@@ -469,16 +566,18 @@ export default function App() {
   async function moveNotebookTo(notes: NotebookSummary[], scene: Relation, contact: string) {
     if (await notebooks.move(notes.map(note => note.id), scene, contact)) setNotice("手记已移动");
   }
-  const names = [...new Set(parsed.map((x) => x.speaker))];
+  const names = [...new Set(importParsed.map((x) => x.speaker))];
   const canAppend = !!messages.length && role === self && names.every((name) => name === self || name === other) && importScene === relation;
   const canFillCurrent = notebooks.canFill(importDraft);
   const effectiveImportTarget = importTarget === "current" && canFillCurrent ? "current" : importTarget === "append" && canAppend ? "append" : "new";
   const libraryDisabled = !ready || switching || !!storageError;
   const manageDisabled = libraryDisabled || busy;
   const folderActions = { moveTo: (notes: NotebookSummary[], scene: Relation, contact: string) => void moveNotebookTo(notes, scene, contact), edit: (id: string) => void editNotebook(id), move: (notes: NotebookSummary[]) => setMovingNotes(notes), recycle: (note: NotebookSummary) => requestNotebookDelete(note),
+    searchMessages: (query: string) => { closeMenu(); setLibraryOpen(false); setSearchOpen({ query }); },
     recycleMany: (notes: NotebookSummary[]) => requestNotebookDelete(notes),
     trashCount: notebooks.trashItems.length, openTrash, manageDisabled };
-  const importInvalid = busy || importModelSaving || !!storageError || !role || !parsed.length || names.length > 2 || names.includes("未分配") || (!names.includes(role) && role !== "__self_absent__");
+  const importTooMany = (effectiveImportTarget === 'append' ? mergeMessages(messages, importMessages).messages.length : importMessages.length) > 100_000;
+  const importInvalid = importTooMany || busy || importDirty || importModelSaving || !!storageError || !role || !importParsed.length || importParsed.some(row => !row.text.trim()) || names.length > 2 || names.includes("未分配") || (!names.includes(role) && role !== "__self_absent__");
   function menuAction(action: () => void) { closeMenu(); action(); }
   const chosen = messages.find((m) => m.id === detail),
     result = detail ? a.lines[detail] : undefined;
@@ -546,6 +645,8 @@ export default function App() {
               <Settings2 size={18} /> 分析设置
             </button>
             <button onClick={() => setSettings(true)}><Settings2 size={18} /> API 配置</button>
+            <button disabled={manageDisabled} onClick={() => { setBackupScope('all'); setBackupOpen(true); }}><Download size={18} /> 备份与恢复</button>
+            <button disabled={manageDisabled} onClick={() => setInsightsOpen(true)}><NotebookPen size={18} /> 我的手记与待跟进</button>
             <div className="rail-note">
               <span className="note-eyebrow">A LITTLE MORE UNDERSTANDING</span>
               <p>
@@ -590,6 +691,8 @@ export default function App() {
               </button>
               {!!messages.length && <IconButton label="分享片段" className="share-entry" disabled={busy || !ready}
                 onClick={() => setShareSource({ title: notebooks.active?.title || '对话片段', conversation: notebooks.snapshot() })}><Share2 size={18} /></IconButton>}
+              <IconButton label="查找聊天正文" className="search-entry" disabled={libraryDisabled} onClick={() => setSearchOpen({ query: '', notebookId: notebooks.active?.id })}><Search size={18} /></IconButton>
+              {!!messages.length && <IconButton label="管理聊天消息" className="mobile-secondary" disabled={manageDisabled} onClick={() => { setRangeStart(1); setRangeEnd(messages.length); setRangeDeleting(false); setRangeOpen(true); }}><ListChecks size={18} /></IconButton>}
               <button
                 className="icon"
                 aria-label="新建对话手记"
@@ -635,7 +738,7 @@ export default function App() {
                     className="scene-select"
                     aria-label="分析场景"
                     value={relation}
-                    disabled={!ready || switching || !!storageError}
+                    disabled={!ready || busy || !!storageError}
                     onChange={value => { setNotice(""); void changeRelation(value as Relation); }}
                   >
                     {Object.entries(RELATIONS).map(([key, label]) => (
@@ -683,7 +786,11 @@ export default function App() {
               </span>
             </button>
           </div>
-          <div ref={reading.container} className="chat-reading">
+          <div ref={reading.container} className={`chat-reading${searchSession ? ' has-search' : ''}`}>
+          {searchSession && <div className="chat-search-nav"><span>“{searchSession.query}” · {searchSession.index + 1}/{searchSession.hits.length}</span>
+            <IconButton label="查找上一条" onClick={() => cycleSearch(-1)}><ArrowLeft size={16} /></IconButton>
+            <IconButton label="查找下一条" onClick={() => cycleSearch(1)}><ArrowRight size={16} /></IconButton>
+            <IconButton label="结束正文查找" onClick={() => setSearchSession(null)}><X size={16} /></IconButton></div>}
           <div
             ref={scroller}
             id="chat-records"
@@ -695,6 +802,10 @@ export default function App() {
               const el = e.currentTarget;
               stay.current =
                 el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+              const top = el.getBoundingClientRect().top;
+              const node = Array.from(el.querySelectorAll<HTMLElement>('.message[data-index]')).find(n => n.getBoundingClientRect().bottom > top);
+              const message = node && messages[Number(node.dataset.index)];
+              if (node && message && !pendingJump) notebooks.rememberReading({ messageId: message.id, offset: Math.max(0, top - node.getBoundingClientRect().top) });
             }}
           >
             {!messages.length ? (
@@ -770,12 +881,12 @@ export default function App() {
                         transform: `translateY(${row.start}px)`,
                       }}
                       id={`message-${m.id}`}
-                      className={`message ${m.sender}`}
+                      className={`message ${m.sender}${highlightedId === m.id ? ' is-highlighted' : ''}`}
                     >
                       <ChatMessage message={m} result={r} self={self} other={other}
                         showTime={i === 0 || m.timestamp !== messages[i - 1].timestamp} busy={busy} showSemantics={a.semanticEnabled}
-                        detail={() => setDetail(m.id)} analyze={() => a.run(messages, relation)}
-                        trailing={<button className="icon message-delete danger" aria-label={`删除第 ${i + 1} 条消息`} data-tooltip="删除这条聊天消息" disabled={manageDisabled} onClick={() => setMessageDelete(m)}><Trash2 size={15} strokeWidth={1.8} /></button>} />
+                        detail={() => setDetail(m.id)} analyze={() => requestAnalysis()}
+                        trailing={<button className="icon message-delete message-actions-toggle" aria-label={`管理第 ${i + 1} 条消息`} data-tooltip="编辑、收藏、重算或删除" disabled={manageDisabled} onClick={() => setDetail(m.id)}><MoreHorizontal size={17} strokeWidth={1.8} /></button>} />
                     </div>
                   );
                 })}
@@ -835,25 +946,18 @@ export default function App() {
               }
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onPaste={(e) => {
-                const t = e.clipboardData.getData("text");
-                if (t.trim()) {
-                  e.preventDefault();
-                  setInput(t);
-                  prepare(t);
-                }
-              }}
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter")
                   prepare(input);
               }}
             />
               <div className="composer-feedback">
+                {importParsing && <p role="status">正在独立识别聊天…<button className="text-button" onClick={() => parsingController.current?.abort()}>取消识别</button></p>}
                 <span role="status">{storageError || notice || notebooks.workspaceNotice}</span>
                 {(busy || a.status === 'error' || a.status === 'complete') && <div className="analysis-status" aria-live="polite">
                   {busy ? <><span className="working" /><span>{a.progress.done}/{a.progress.total}</span></>
                     : a.status === 'error' ? <><CircleAlert size={16} aria-label="分析未完成" /><span>分析未完成</span></>
-                    : <span className="completed" aria-label="分析完成"><Check size={14} />分析完成</span>}
+                    : <span className="completed" aria-label={a.semanticEnabled && a.semanticStatus === 'error' ? '基础完成，补充未完成' : '分析完成'}><Check size={14} />{a.semanticEnabled && a.semanticStatus === 'error' ? '基础完成，补充未完成' : '分析完成'}</span>}
                 </div>}
                 {a.error && <span className="error" role="alert">{a.error}</span>}
                 {a.semanticNotice && <span role="status">{a.semanticNotice}</span>}
@@ -862,14 +966,15 @@ export default function App() {
                 <div className="composer-actions">
                   {storageError && notebooks.active && <IconButton label="重试保存" onClick={() => void notebooks.retrySave()}><RotateCcw size={18} /></IconButton>}
                   {busy ? <IconButton label="停止分析" onClick={a.cancel}><Square size={17} /></IconButton>
-                    : !storageError && a.status === 'error' ? <IconButton label="重试分析" onClick={() => a.run(messages, relation)}><RotateCcw size={18} /></IconButton>
-                    : !storageError && a.status !== 'complete' && messages.length ? <IconButton label="继续分析" onClick={() => a.run(messages, relation)}><Sparkles size={18} /></IconButton> : null}
+                    : !storageError && a.status === 'error' ? <IconButton label="重试分析" onClick={() => requestAnalysis()}><RotateCcw size={18} /></IconButton>
+                    : !storageError && a.status !== 'complete' && messages.length ? <IconButton label="继续分析" onClick={() => requestAnalysis()}><Sparkles size={18} /></IconButton> : null}
                   {a.status === 'complete' && !busy && !storageError && !!messages.length && (a.overview || Object.keys(a.lines).length > 0) && primaryAnalysis?.configured &&
                     <IconButton label="重新分析" disabled={busy || !!storageError || !ready} onClick={() => setReanalyzeOpen(true)}><RotateCcw size={18} /></IconButton>}
-                  {!storageError && a.semanticEnabled && messages.some(m => m.sender === 'other' && a.lines[m.id]?.emotions) && <IconButton label="补充表达方式与潜台词" disabled={busy} onClick={() => void a.supplementOnly(messages, relation)}><MessageCircle size={18} /></IconButton>}
+                  {!storageError && a.semanticEnabled && messages.some(m => m.sender === 'other' && a.lines[m.id]?.emotions) && <IconButton label="补充表达方式与潜台词" disabled={busy} onClick={() => requestAnalysis([], true)}><MessageCircle size={18} /></IconButton>}
+                  {notebooks.active?.undo && <IconButton label={`撤销${notebooks.active.undo.label}`} disabled={manageDisabled} onClick={() => void notebooks.undoMessages().then(note => { if (note) setNotice('已撤销最近一次消息修改，原文和各场景结果已恢复。'); })}><ArrowLeft size={18} /></IconButton>}
                   {(a.analysisUsage || a.semanticUsage || a.failedAnalysisUsage) && <IconButton label="分析用量" onClick={() => setUsageOpen(true)}><BarChart3 size={18} /></IconButton>}
                 </div>
-              <button type="button" className="send" disabled={!input.trim() || busy || !!storageError || !ready} onClick={() => prepare(input)}><Sparkles size={19} /><span>开始分析</span></button>
+              <button type="button" className="send" disabled={!input.trim() || busy || !!storageError || !ready} onClick={() => prepare(input)}><Sparkles size={19} /><span>预览导入</span></button>
             </div>
           </div>
         </section>
@@ -886,6 +991,10 @@ export default function App() {
         <button disabled={busy} onClick={() => menuAction(() => prepare(exampleForRelation(relation)))}><BookOpen size={19} /> 试试一段示例</button>
         <span className="rail-label rail-label-second">工具与帮助</span>
         <button onClick={() => menuAction(() => setAppearanceOpen(true))}><Settings2 size={19} /> 外观模式</button>
+        <button disabled={manageDisabled} onClick={() => menuAction(() => { setBackupScope('all'); setBackupOpen(true); })}><Download size={19} /> 备份与恢复</button>
+        <button disabled={manageDisabled} onClick={() => menuAction(() => setInsightsOpen(true))}><NotebookPen size={19} /> 我的手记与待跟进</button>
+        <button disabled={libraryDisabled} onClick={() => menuAction(() => setSearchOpen({ query: '', notebookId: notebooks.active?.id }))}><Search size={19} /> 查找聊天正文</button>
+        <button disabled={manageDisabled || !messages.length} onClick={() => menuAction(() => { setRangeStart(1); setRangeEnd(messages.length); setRangeDeleting(false); setRangeOpen(true); })}><ListChecks size={19} /> 管理聊天消息</button>
         <button className="update-entry" aria-label={updates.hasUpdate ? "版本与更新，有新版本" : "版本与更新"} onClick={() => menuAction(() => setUpdatesOpen(true))}>
           <span className="update-icon"><Download size={19} />{updates.hasUpdate && <span className="update-dot" aria-hidden="true" />}</span>
           版本与更新{updates.hasUpdate && <span className="nav-count">新版本</span>}
@@ -899,7 +1008,7 @@ export default function App() {
         <button onClick={() => menuAction(() => setOnboarding(true))}><BookOpen size={19} /> 使用引导</button>
       </MobileDrawer>
       {importing && (
-        <Modal title="确认聊天里的你" close={() => setImporting(false)} suspended={settings}>
+        <Modal title="确认聊天里的你" close={() => { parsingController.current?.abort(); setImporting(false); }} suspended={settings}>
           <label className="field">
             本次分析场景
             <ToggleSelect
@@ -956,15 +1065,27 @@ export default function App() {
               value={raw}
               onChange={(e) => {
                 setRaw(e.target.value);
-                setParsed(parseChat(e.target.value).messages);
+                setImportDirty(true);
               }}
             />
           </label>
+          {importDirty && <button className="secondary" disabled={importParsing} onClick={async () => {
+            const controller = new AbortController(); parsingController.current = controller; setImportParsing(true);
+            try { const result = await parseChatAsync(raw, controller.signal); setParsed(result.messages); setImportDirty(false); setImportSelection({ start: 1, end: result.messages.length, from: '', to: '' }); }
+            catch (e) { setNotice(controller.signal.aborted ? '已取消识别。' : (e as Error).message); }
+            finally { setImportParsing(false); parsingController.current = null; }
+          }}>重新识别编辑后的文字</button>}
+          {!importDirty && <ImportReview rows={parsed} selection={importSelection} select={setImportSelection} change={rows => {
+            setParsed(rows); if (role !== '__self_absent__' && !rows.some(r => r.speaker === role)) setRole(rows.some(r => r.speaker === '我') ? '我' : '');
+          }} />}
           {(names.length > 2 || names.includes("未分配")) && (
             <p className="error">
               请保留两个人的聊天，可改成「我：内容」「对方：内容」。
             </p>
           )}
+          {importTooMany && <p className="error">单份手记最多 10 万条消息，请缩小导入范围或另建手记。</p>}
+          {!importInvalid && <AnalysisPlan messages={effectiveImportTarget === 'append' ? mergeMessages(messages, importMessages).messages : importMessages}
+            relation={importScene} saved={effectiveImportTarget === 'append' ? notebooks.snapshot() : undefined} config={apiInfo} semanticEnabled={a.semanticEnabled} semanticMode={a.semanticMode} />}
           <button
             className="primary"
             disabled={importInvalid}
@@ -1026,7 +1147,7 @@ export default function App() {
           </p>
           <button
             className="secondary"
-            disabled={!messages.length}
+            disabled={!messages.length || busy}
             onClick={() => {
               const ms = messages.map((m) => ({
                 ...m,
@@ -1037,7 +1158,7 @@ export default function App() {
               setOther(self === "__self_absent__" ? "我" : self);
               setMessages(ms);
               a.reset();
-              a.run(ms, relation);
+              setNotice('双方身份已交换。旧结果已清除，需要时点击继续分析。');
               setAnalysisSettingsOpen(false);
             }}
           >
@@ -1059,22 +1180,71 @@ export default function App() {
             ；分析片段会发送给所选模型。
           </p>
           <button className="secondary" onClick={() => { setAnalysisSettingsOpen(false); setOnboarding(true); }}>使用引导</button>
+          <button className="secondary" disabled={manageDisabled} onClick={() => { setAnalysisSettingsOpen(false); setHistoryOpen(true); }}>分析版本历史</button>
         </Modal>
       )}
       {updatesOpen && <Modal title="版本与更新" close={() => setUpdatesOpen(false)}><UpdatesPage updates={updates} /></Modal>}
       {usageOpen && <Modal title="分析用量" close={() => setUsageOpen(false)}>
         <ConversationUsage primary={a.analysisUsage} semantic={a.semanticUsage} failed={a.failedAnalysisUsage} primaryRestored={a.usageRestored} semanticRestored={a.semanticUsageRestored} />
+        <UsageHistory runs={notebooks.runHistory} />
       </Modal>}
       {reanalyzeOpen && <Modal title="重新分析当前对话" close={() => setReanalyzeOpen(false)}>
         <p>将使用 {primaryAnalysis?.model || '当前模型'} 重新分析当前场景，聊天原文保留。</p>
-        <p>这会覆盖当前分析结果和用量记录，原结果无法恢复，并会产生新的模型用量。</p>
+        <p>当前结果将保存为历史版本。重新分析会产生新的模型用量，已发生的用量继续保留。</p>
+        <AnalysisPlan messages={messages} relation={relation} config={apiInfo} semanticEnabled={a.semanticEnabled} semanticMode={a.semanticMode} fresh />
         <button className="primary danger" disabled={busy || !!storageError || !primaryAnalysis?.configured} onClick={() => {
           setReanalyzeOpen(false); setDetail(null); setNotice('');
-          void a.run(messages, relation, true);
-        }}>确认覆盖并重新分析</button>
+          void beginCurrentAnalysis(true);
+        }}>保留版本并重新分析</button>
         <button className="secondary" onClick={() => setReanalyzeOpen(false)}>取消</button>
       </Modal>}
+      {analysisConfirm && <Modal title="确认分析当前手记" close={() => setAnalysisConfirm(false)}>
+        {!!analysisTargets.length && <p>已选择 {analysisTargets.length} 条消息重算；依赖这些消息的上下文和总览也可能需要更新。</p>}
+        {analysisSupplement && <p>只补充表达方式与潜台词，保留基础分析。</p>}
+        <AnalysisPlan messages={messages} relation={relation} saved={analysisTargets.length ? { ...notebooks.snapshot(), completed: false, analyzedCount: 0,
+          lines: Object.fromEntries(Object.entries(a.lines).filter(([id]) => !analysisTargets.includes(id))) } : notebooks.snapshot()} config={apiInfo} semanticEnabled={a.semanticEnabled} semanticMode={a.semanticMode} />
+        <p>本次会处理当前手记尚未完成或上下文变化的部分。已保存结果可按有效上下文复用。</p>
+        <button className="primary" disabled={busy || !!storageError || !primaryAnalysis?.configured} onClick={async () => {
+          setAnalysisConfirm(false);
+          if (analysisSupplement) { void beginCurrentAnalysis(false, true); return; }
+          if (analysisTargets.length) {
+            const note = await notebooks.invalidateTargets(analysisTargets);
+            if (note) setPendingImportAnalysis({ notebookId: note.id, messages: note.conversation.messages, relation: note.conversation.relation });
+          } else void beginCurrentAnalysis();
+        }}>确认并开始分析</button>
+        <button className="secondary" onClick={() => setAnalysisConfirm(false)}>取消</button>
+      </Modal>}
       {appearanceOpen && <Modal title="外观模式" close={() => setAppearanceOpen(false)}><AppearanceSettings appearance={appearance} /></Modal>}
+      {backupOpen && <Modal title="备份与恢复" close={() => { if (!backupBusy) setBackupOpen(false); }}>
+        <BackupPanel activeId={notebooks.active?.id} existingIds={[...notebooks.items, ...notebooks.trashItems].map(n => n.id)}
+          initialScope={backupScope} onBusyChange={setBackupBusy} exportData={notebooks.exportData} restore={notebooks.restoreBackup} />
+      </Modal>}
+      {searchOpen && <Modal title="查找聊天正文" close={() => setSearchOpen(null)}>
+        <MessageSearch initialQuery={searchOpen.query} notebookId={searchOpen.notebookId} open={(hit, hits, query) => {
+          setSearchSession({ hits, query, index: hits.indexOf(hit) }); setSearchOpen(null); void navigateMessage(hit);
+        }} />
+        <p className="folder-help">Ctrl+F 查找当前手记，Ctrl+Shift+F 搜索全部，F3 / Shift+F3 切换命中。</p>
+      </Modal>}
+      {historyOpen && <Modal title="分析版本历史" close={() => setHistoryOpen(false)}>
+        <AnalysisHistory versions={notebooks.active?.versions ?? []} current={notebooks.snapshot()} restore={async id => {
+          if (await notebooks.restoreVersion(id)) { setHistoryOpen(false); setNotice('历史分析已恢复，历史用量保留，没有调用模型。'); }
+        }} />
+        <AnalysisTimeline points={[...(notebooks.active?.versions ?? []).flatMap(v => v.conversation.trend), ...a.trend]} />
+      </Modal>}
+      {insightsOpen && notebooks.active && <Modal title="我的手记与待跟进" close={() => setInsightsOpen(false)}>
+        <NotebookInsights note={{ ...notebooks.active, conversation: notebooks.snapshot() }} save={notebooks.savePersonal} locate={id => { setInsightsOpen(false); locateCurrentMessage(id); }} />
+      </Modal>}
+      {pendingNavigation && <Modal title="暂停分析并切换手记？" close={() => setPendingNavigation(null)}>
+        <p>当前分析尚未结束。切换会暂停新请求，已保存的结果和用量会保留，回来后可继续分析。正在发送的请求可能已经产生用量。</p>
+        <button className="primary" disabled={switching} onClick={async () => {
+          const destination = pendingNavigation;
+          if (await (destination.notebookId === '__new__' ? notebooks.create() : notebooks.select(destination.notebookId))) {
+            setPendingNavigation(null); resetViews();
+            if (destination.messageId) setPendingJump({ notebookId: destination.notebookId, messageId: destination.messageId, highlight: true });
+          }
+        }}>保留进度并切换</button>
+        <button className="secondary" onClick={() => setPendingNavigation(null)}>继续当前分析</button>
+      </Modal>}
       {installedUpdatePrompt && <Modal title="本次更新内容" close={updates.acknowledgeInstalledChanges}>
         <p>对话手记 v{APP_BUILD.version} 已更新。</p>
         <UpdateChanges changes={APP_BUILD.changes} />
@@ -1094,9 +1264,24 @@ export default function App() {
       </Modal>}
       {messageDelete && <Modal title="删除这条聊天消息？" close={() => setMessageDelete(null)}>
         <blockquote>{messageDelete.text}</blockquote>
-        <p>删除消息不可撤销，并会清除这份手记各场景的旧分析。其他消息和草稿保留，不自动重算。</p>
+        <p>会清除上下文发生变化的分析，可撤销最近一次消息修改。其他消息和草稿保留，不自动重算。</p>
         <button className="primary danger" disabled={manageDisabled} onClick={() => void confirmMessageDelete()}>删除消息</button>
         <button className="secondary" onClick={() => setMessageDelete(null)}>取消</button>
+      </Modal>}
+      {editingMessage && <Modal title="编辑聊天消息" close={() => setEditingMessage(null)}>
+        <label className="field">发送人<ToggleSelect aria-label="编辑消息发送人" value={messageSender} onChange={v => setMessageSender(v as Message['sender'])}><option value="self">我</option><option value="other">对方</option></ToggleSelect></label>
+        <label className="field">原文<textarea aria-label="编辑消息原文" value={messageText} onChange={e => setMessageText(e.target.value)} /></label>
+        <p>保存后清除依赖变化的结果，不自动调用模型；可撤销最近一次修改。</p>
+        <button className="primary" disabled={manageDisabled || !messageText.trim()} onClick={async () => { if (await notebooks.editMessage(editingMessage.id, messageText, messageSender)) { setEditingMessage(null); setNotice('消息已修改，可撤销；需要时继续分析。'); } }}>保存消息修改</button>
+      </Modal>}
+      {rangeOpen && <Modal title="管理聊天消息" close={() => setRangeOpen(false)}>
+        <p>按原对话顺序选择连续范围，共 {messages.length} 条。</p>
+        <div className="search-filters"><label className="field">从第几条<input type="number" min={1} max={messages.length} value={rangeStart} onChange={e => { setRangeStart(Number(e.target.value)); setRangeDeleting(false); }} /></label>
+          <label className="field">到第几条<input type="number" min={rangeStart} max={messages.length} value={rangeEnd} onChange={e => { setRangeEnd(Number(e.target.value)); setRangeDeleting(false); }} /></label></div>
+        <p>{validRange ? `已选 ${rangeIds.length} 条。` : '请输入有效的整数范围，起始序号不能大于结束序号。'}</p>
+        <button className="secondary" disabled={manageDisabled || !rangeIds.length} onClick={() => { setRangeOpen(false); requestAnalysis(rangeIds); }}>重新分析所选范围</button>
+        {rangeDeleting ? <><p>确认删除这 {rangeIds.length} 条消息？会清除依赖变化的结果，可撤销最近一次修改。</p><button className="primary danger" disabled={manageDisabled || !rangeIds.length} onClick={async () => { if (await notebooks.deleteMessages(rangeIds)) { setRangeOpen(false); setNotice('所选消息已删除，可撤销最近一次修改。'); } }}>确认删除所选消息</button></>
+          : <button className="secondary danger" disabled={manageDisabled || !rangeIds.length} onClick={() => setRangeDeleting(true)}>删除所选消息</button>}
       </Modal>}
       {libraryOpen && <Modal title="对话文件夹" close={() => setLibraryOpen(false)} suspended={trashOpen || !!notebookDelete || !!movingNotes}>
         <ConversationFolders items={notebooks.items} activeId={notebooks.active?.id} disabled={libraryDisabled}
@@ -1125,6 +1310,7 @@ export default function App() {
         <label className="field">分析场景<ToggleSelect aria-label="手记场景分类" value={editScene} onChange={value => setEditScene(value as Relation)}>{Object.entries(RELATIONS).map(([key, value]) => <option key={key} value={key}>{value}</option>)}</ToggleSelect></label>
         <p>分析场景：{RELATIONS[editScene]}。换场景会保留旧结果；调整文件夹请使用“移动”。</p>
         <button className="primary" disabled={manageDisabled || !editTitle.trim() || !editContact.trim()} onClick={() => void saveNotebookEdit()}>保存</button>
+        <button className="secondary" disabled={manageDisabled} onClick={() => { setEditingNotebook(false); setBackupScope('current'); setBackupOpen(true); }}>备份当前手记</button>
       </Modal>}
       {detail && detail !== "clear" && (
         <Modal
@@ -1154,6 +1340,8 @@ export default function App() {
                 按「{RELATIONS[relation]}
                 」场景，参考近期对话和相关历史原话评分。请结合证据充分程度阅读，不同场景的分数不宜直接比较。
               </p>
+              {a.overviewSource && <div className="result-source"><p>{a.overviewSource.model} · {new Date(a.overviewSource.at).toLocaleString('zh-CN')} · 总览参考 {a.overviewSource.messageIds.length}/{messages.length} 条原话。</p>
+                <p>{a.overviewSource.provisional || !a.overviewFresh ? '此总览暂定或需要更新。' : '总览已完成。'}逐句分析分别选择上下文，不等于全部历史都进入总览。</p></div>}
               {ov && (
                 <p>
                   {relation !== "couple" && (
@@ -1175,6 +1363,7 @@ export default function App() {
                     return m ? (
                       <blockquote key={id}>
                         {m.sender === "self" ? self : other}：{m.text}
+                        <button className="text-button" onClick={() => locateCurrentMessage(m.id)}>定位原话</button>
                       </blockquote>
                     ) : null;
                   })}
@@ -1261,6 +1450,15 @@ export default function App() {
           ) : (
             <>
               <blockquote>{chosen?.text}</blockquote>
+              {result?.analysisContext && <details className="result-source"><summary>分析来源与参考范围</summary>
+                <p>{result.analysisContext.model} · {RELATIONS[relation]}{result.analysisContext.at ? ` · ${new Date(result.analysisContext.at).toLocaleString('zh-CN')}` : ''}</p>
+                <p>规则 {result.analysisContext.rubric}，参考 {result.analysisContext.messageIds?.length ?? '未记录'} 条原话。{chosen?.sender === 'self' ? '评价只使用发出当时已有的信息。' : ''}</p>
+                {result.analysisContext.messageIds?.map(id => messages.find(m => m.id === id)).filter((m): m is Message => !!m).map(m => <button className="text-button context-source-link" key={m.id} onClick={() => locateCurrentMessage(m.id)}>{m.sender === 'self' ? '我' : '对方'}：{m.text.slice(0, 70)}</button>)}
+              </details>}
+              {chosen && <div className="message-detail-actions"><button className="secondary" disabled={manageDisabled} onClick={() => openMessageEdit(chosen)}>编辑原文或发送人</button>
+                <button className="secondary" disabled={manageDisabled} onClick={() => { setDetail(null); requestAnalysis([chosen.id]); }}>重新分析这条消息</button>
+                <button className="secondary" disabled={manageDisabled} onClick={() => void notebooks.toggleFavorite(chosen.id)}>{notebooks.active?.favorites?.includes(chosen.id) ? '取消收藏原话' : '收藏这条原话'}</button>
+                <button className="secondary danger" disabled={manageDisabled} onClick={() => { setDetail(null); setMessageDelete(chosen); }}>删除这条消息</button></div>}
               {chosen?.sender === "other" ? (
                 <>
                   <h3>情绪</h3>
@@ -1285,7 +1483,7 @@ export default function App() {
                       ))}
                     {!result?.intents && <p>意图尚未分析。</p>}
                   </div>
-                  {a.semanticEnabled && <SemanticDetail result={result} messages={messages} />}
+                  {a.semanticEnabled && <SemanticDetail result={result} messages={messages} locate={locateCurrentMessage} />}
                 </>
               ) : (
                 <>

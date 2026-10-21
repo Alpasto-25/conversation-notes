@@ -61,7 +61,7 @@ export async function prepareImages(source: ShareSource, ids: readonly string[],
       self={c.self} other={c.other} showTime={entry.index === 0 || entry.message.timestamp !== c.messages[entry.index - 1].timestamp} /></div>;
   };
   let disposed = false;
-  function dispose() { if (!disposed) { disposed = true; root.unmount(); host.remove(); } }
+  function dispose() { if (!disposed) { disposed = true; host.remove(); setTimeout(() => root.unmount(), 0); } }
   try {
     await document.fonts.ready;
     flushSync(() => root.render(<div className="share-render-stage" style={{ width }}>{messages.map(({ message }) => <div key={message.id} data-render-id={message.id}>{content(message.id)}</div>)}</div>));

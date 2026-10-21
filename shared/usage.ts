@@ -47,6 +47,7 @@ export type TokenUsage = {
   details?: RequestUsage[];
 };
 export type AnalysisUsage = TokenUsage & {
+  unreported_batches?: number;
   local_targets: number;
   elapsed_ms: number;
   provider?: string;
@@ -85,6 +86,7 @@ export function combineAnalysisUsage(values: (AnalysisUsage | undefined)[]): Ana
   const starts = runs.flatMap(run => run.started_at ? [run.started_at] : []).sort();
   const finishes = runs.flatMap(run => run.finished_at ? [run.finished_at] : []).sort();
   return { ...totals, local_targets: runs.reduce((sum, run) => sum + run.local_targets, 0),
+    ...(runs.some(run => run.unreported_batches) ? { unreported_batches: runs.reduce((sum, run) => sum + (run.unreported_batches ?? 0), 0) } : {}),
     elapsed_ms: runs.reduce((sum, run) => sum + run.elapsed_ms, 0),
     ...(models.length ? { model: models.join(' + ') } : {}),
     ...(starts.length ? { started_at: starts[0] } : {}),

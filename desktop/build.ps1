@@ -1,5 +1,6 @@
-param([switch]$TestOnly)
+param([switch]$TestOnly, [switch]$SkipTests, [string]$OutputDirectory)
 $ErrorActionPreference = 'Stop'
+if ($TestOnly -and $SkipTests) { throw 'TestOnly and SkipTests cannot be combined.' }
 # A Windows PowerShell child must not load PowerShell 7 binary modules.
 $env:PSModulePath = (Join-Path $PSHOME 'Modules') + [IO.Path]::PathSeparator + $env:PSModulePath
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -9,12 +10,12 @@ $workspaceRoot = if ((Split-Path -Leaf (Split-Path -Parent $projectRoot)) -eq 'o
 $toolsRoot = Join-Path $workspaceRoot 'work\windows-tools'
 $buildRoot = Join-Path $workspaceRoot ('work\windows-build\' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff'))
 $payload = Join-Path $buildRoot 'app'
-$outputRoot = Join-Path $workspaceRoot 'outputs'
+$outputRoot = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $workspaceRoot 'outputs' }
 $webviewVersion = '1.0.4258.31'
 $sdkRoot = Join-Path $toolsRoot "webview2-$webviewVersion"
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 
-New-Item -ItemType Directory -Force -Path $toolsRoot,$payload | Out-Null
+New-Item -ItemType Directory -Force -Path $toolsRoot,$payload,$outputRoot | Out-Null
 if (-not (Test-Path -LiteralPath $compiler)) { throw '.NET Framework C# compiler not found.' }
 if (-not (Test-Path -LiteralPath (Join-Path $sdkRoot 'lib\net462\Microsoft.Web.WebView2.Core.dll'))) {
     $sdkZip = Join-Path $toolsRoot "webview2-$webviewVersion.zip"
@@ -71,6 +72,7 @@ $appExe = Join-Path $payload 'ConversationNotes.exe'
 if ($LASTEXITCODE -ne 0) { throw 'Windows application compilation failed.' }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'App.config') -Destination "$appExe.config"
 
+if (-not $SkipTests) {
 $testExe = Join-Path $payload 'DesktopTests.exe'
 & $compiler @common /target:exe /main:ConversationNotes.DesktopTests "/out:$testExe" $source (Join-Path $PSScriptRoot 'Tests.cs')
 if ($LASTEXITCODE -ne 0) { throw 'Desktop tests compilation failed.' }
@@ -87,6 +89,9 @@ foreach ($name in @('Microsoft.Web.WebView2.Core.dll','Microsoft.Web.WebView2.Wi
     Copy-Item -LiteralPath (Join-Path $payload $name) -Destination $buildRoot -Recurse
 }
 Write-Output "Native build and tests: $buildRoot"
+} else {
+    Write-Output "Native build: $buildRoot (tests skipped)"
+}
 if ($TestOnly) { return }
 
 $innoRoot = Join-Path $toolsRoot 'inno-6.7.3'
@@ -122,5 +127,5 @@ if (-not (Test-Path -LiteralPath $chineseLanguage)) {
 if ((Get-FileHash -LiteralPath $chineseLanguage -Algorithm SHA256).Hash -ne 'E0B0B350E2245F3C5E65586DFE43D574F6E7F06F2261149ABA284954B3FC9A8D') { throw 'Chinese installer translation SHA256 mismatch.' }
 & $iscc "/DPayload=$payload" "/DOutput=$outputRoot" "/DChineseLanguage=$chineseLanguage" (Join-Path $PSScriptRoot 'installer.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Windows installer compilation failed.' }
-Compress-Archive -Path (Join-Path $payload '*') -DestinationPath (Join-Path $outputRoot 'ConversationNotes-Portable-1.1.4-x64.zip') -Force
-Write-Output "Installer: $(Join-Path $outputRoot 'ConversationNotes-Setup-1.1.4-x64.exe')"
+Compress-Archive -Path (Join-Path $payload '*') -DestinationPath (Join-Path $outputRoot 'ConversationNotes-Portable-1.1.5-x64.zip') -Force
+Write-Output "Installer: $(Join-Path $outputRoot 'ConversationNotes-Setup-1.1.5-x64.exe')"

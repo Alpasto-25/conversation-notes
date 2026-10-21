@@ -4,25 +4,27 @@ import { ChevronRight } from 'lucide-react';
 
 const number = (value: number | undefined) => value === undefined ? '未提供' : value.toLocaleString('zh-CN');
 const money = (value: number) => value === 0 ? '¥0' : value < 0.0001 ? '小于 ¥0.0001' : `¥${value.toFixed(4)}`;
-export function AnalysisUsage({ usage, runs, restored = false, combined = false }: {
+export function AnalysisUsage({ usage, runs, restored = false, combined = false, description }: {
   usage?: UsageStats; runs?: UsageStats[]; restored?: boolean; combined?: boolean;
+  description?: string;
 }) {
   if (!usage) return null;
   const { models, unattributed } = summarizeModelUsage(runs ?? [usage]);
   const hasDeepseek = models.some(model => model.kind === 'deepseek');
   return <div className="analysis-usage">
-    <p>{combined ? '当前对话的基础分析与潜台词用量。' : '本次分析用量。'}{restored ? '恢复已保存结果不产生新费用。' : ''}</p>
+    <p>{description || (combined ? '当前对话的基础分析与潜台词用量。' : '本次分析用量。')}{restored ? '恢复已保存结果不产生新费用。' : ''}</p>
     <dl className="usage-overview">
       {usage.finished_at && <div><dt>分析时间</dt><dd>{new Date(usage.finished_at).toLocaleString('zh-CN', { hour12: false })}</dd></div>}
-      {usage.requests !== undefined && <div><dt>接口请求</dt><dd>{number(usage.requests)} 次</dd></div>}
+      {usage.requests !== undefined && <div><dt>{usage.unreported_batches ? '已返回用量的请求' : '接口请求'}</dt><dd>{number(usage.requests)} 次</dd></div>}
       <div><dt>{combined ? '累计耗时' : '耗时'}</dt><dd>{(usage.elapsed_ms / 1000).toFixed(1)} 秒</dd></div>
       {!!usage.local_targets && <div><dt>本机复用</dt><dd>{number(usage.local_targets)} 条 · 不收费</dd></div>}
     </dl>
+    {!!usage.unreported_batches && <p className="usage-footnote">另有 {usage.unreported_batches} 次请求尝试尚未返回完整用量，总费用未知。下方只统计已知部分，不能视为零费用。</p>}
     {models.map(model => <section className="usage-model" key={model.model} aria-label={`${model.kind === 'jev' ? 'Jev' : model.kind === 'deepseek' ? 'DeepSeek' : '模型'} 用量`}>
       <h4>{model.kind === 'jev' ? 'Jev' : model.kind === 'deepseek' ? 'DeepSeek' : '其他模型'}<span>{model.model}</span></h4>
       {model.kind === 'jev' ? <p>Jev 接口不提供详细用量，无法估算费用，请以平台账单为准。</p> : !model.records.length ? <p>这份旧记录未单独记录此模型用量。</p> : <>
         <dl>
-          {model.kind === 'deepseek' && <div className="usage-cost"><dt>预估费用</dt><dd><strong>{model.fee
+          {model.kind === 'deepseek' && <div className="usage-cost"><dt>{usage.unreported_batches ? '已知部分费用' : '预估费用'}</dt><dd><strong>{model.fee
             ? Math.abs(model.fee.max - model.fee.min) < 1e-10 || model.fee.max < 0.0001 ? money(model.fee.max) : `${money(model.fee.min)} ～ ${money(model.fee.max)}`
             : '暂无法估算'}</strong></dd></div>}
           <div><dt>输入 tokens</dt><dd>{number(model.input_tokens)}</dd></div>

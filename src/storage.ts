@@ -3,7 +3,9 @@ import type { MemoryEvent } from "../shared/memory";
 import type { CachedTarget } from "./analysis-cache";
 import type { AnalysisUsage, AnalysisIdentity } from "../shared/usage";
 import { moveNotebook, newNotebook, summarizeNotebook, type Notebook, type NotebookSummary } from "./notebooks";
-export type Trend = { at: string; value: number | null; count: number };
+import { validateBackup, type NotebookBackup, type RestoreMode } from './backup';
+import { matchingMessages, type MessageHit, type SearchFilter } from './message-search';
+export type Trend = { at: string; value: number | null; count: number; provider?: string; model?: string; rubric?: string; relation?: Relation; chatFrom?: string; chatTo?: string };
 export type NotebookBatchAction = "recycle" | "recover" | "purge";
 export type SavedConversation = {
   schema: 1;
@@ -23,18 +25,24 @@ export type SavedConversation = {
   failedAnalysisUsage?: AnalysisUsage;
   analysisIdentity?: AnalysisIdentity;
   semanticUsage?: AnalysisUsage;
+  semanticState?: { status: 'idle' | 'loading' | 'complete' | 'error'; message: string };
+  overviewSource?: { provider: string; model: string; at: string; messageIds: string[]; provisional: boolean };
+  analysisTask?: { status: 'running' | 'paused' | 'complete' | 'error'; done: number; total: number };
 };
 export function createNotebookStore(factory?: IDBFactory) {
   let connection: Promise<IDBDatabase> | undefined;
   let queue: Promise<unknown> = Promise.resolve();
   function db() {
     return (connection ??= new Promise<IDBDatabase>((resolve, reject) => {
-      const req = (factory ?? indexedDB).open("crush-monitor", 2);
+      const req = (factory ?? indexedDB).open("crush-monitor", 3);
       let failed = false;
       req.onupgradeneeded = () => {
         const database = req.result;
         if (!database.objectStoreNames.contains("workspace")) database.createObjectStore("workspace");
-        const notes = database.createObjectStore("notebooks", { keyPath: "id" });
+        const notes = database.objectStoreNames.contains('notebooks') ? req.transaction!.objectStore('notebooks') : database.createObjectStore("notebooks", { keyPath: "id" });
+        const summaries = database.createObjectStore('notebookIndex', { keyPath: 'id' });
+        const cursor = notes.openCursor();
+        cursor.onsuccess = () => { const row = cursor.result; if (row) { summaries.put(summarizeNotebook(row.value)); row.continue(); } };
         const workspace = req.transaction!.objectStore("workspace");
         const legacy = workspace.get("current");
         legacy.onsuccess = () => {
@@ -42,6 +50,7 @@ export function createNotebookStore(factory?: IDBFactory) {
           if (old?.schema !== 1 || !Array.isArray(old.messages) || !old.messages.length) return;
           const note = newNotebook(old, `${old.other || "对方"}的对话手记`, old.other);
           notes.put(note);
+          summaries.put(summarizeNotebook(note));
           workspace.put(note.id, "activeId");
           // All three writes commit together, or the old database remains intact.
           workspace.delete("current");
@@ -60,29 +69,73 @@ export function createNotebookStore(factory?: IDBFactory) {
     const operation = queue.catch(() => {}).then(async () => {
       const database = await db();
       return new Promise<T>((resolve, reject) => {
-        const tx = database.transaction(["workspace", "notebooks"], mode);
+        const tx = database.transaction(["workspace", "notebooks", "notebookIndex"], mode);
         let value: T;
         tx.oncomplete = () => resolve(value);
         tx.onerror = () => reject(tx.error);
         tx.onabort = () => reject(tx.error ?? new Error("保存被中断"));
-        perform(tx, (next) => { value = next; });
+        try { perform(tx, (next) => { value = next; }); }
+        catch (error) { tx.abort(); reject(error); }
       });
     });
     queue = operation;
     return operation;
   }
+  function putNote(tx: IDBTransaction, note: Notebook, add = false) {
+    const notes = tx.objectStore('notebooks');
+    if (add) notes.add(note); else notes.put(note);
+    tx.objectStore('notebookIndex').put(summarizeNotebook(note));
+  }
+  function deleteNote(tx: IDBTransaction, id: string) { tx.objectStore('notebooks').delete(id); tx.objectStore('notebookIndex').delete(id); }
   return {
+    searchMessages: (query: string, filter: SearchFilter = {}) => transaction<MessageHit[]>('readonly', (tx, result) => {
+      const hits: MessageHit[] = [], cursor = tx.objectStore('notebooks').openCursor();
+      cursor.onsuccess = () => {
+        const row = cursor.result;
+        if (!row) { result(hits); return; }
+        hits.push(...matchingMessages(row.value as Notebook, query, filter, 200 - hits.length));
+        if (hits.length >= 200) result(hits); else row.continue();
+      };
+    }),
+    rememberReading: (id: string, reading: Notebook['reading']) => transaction<void>('readwrite', tx => {
+      const notes = tx.objectStore('notebooks'), request = notes.get(id);
+      request.onsuccess = () => { const note = request.result as Notebook | undefined; if (note && !note.deletedAt) putNote(tx, { ...note, reading }); };
+    }),
+    exportAll: () => transaction<Notebook[]>("readonly", (tx, result) => {
+      const request = tx.objectStore('notebooks').getAll(); request.onsuccess = () => result(request.result);
+    }),
+    restoreBackup: (input: NotebookBackup, mode: RestoreMode) => {
+      const backup = validateBackup(input);
+      if (mode !== 'merge' && mode !== 'copies') return Promise.reject(new Error('恢复方式无效'));
+      return transaction<{ imported: number; skipped: number }>('readwrite', (tx, result) => {
+        const notes = tx.objectStore('notebooks'), all = notes.getAll();
+        all.onsuccess = () => {
+          const existing = new Set((all.result as Notebook[]).map(n => n.id));
+          let imported = 0, skipped = 0, selected: string | undefined;
+          for (const original of backup.notebooks) {
+            if (mode === 'merge' && existing.has(original.id)) { skipped++; continue; }
+            const note = mode === 'copies' ? { ...original, id: crypto.randomUUID(), title: `${original.title.slice(0, 90)}（导入副本）` } : original;
+            putNote(tx, note, true); existing.add(note.id); imported++;
+            if (!note.deletedAt && (!selected || original.id === backup.activeId)) selected = note.id;
+          }
+          if (selected) tx.objectStore('workspace').put(selected, 'activeId');
+          result({ imported, skipped });
+        };
+      });
+    },
     loadLibrary: () => transaction<{ items: NotebookSummary[]; trash: NotebookSummary[]; active?: Notebook }>("readwrite", (tx, result) => {
-      const all = tx.objectStore("notebooks").getAll();
+      const all = tx.objectStore("notebookIndex").getAll();
       const active = tx.objectStore("workspace").get("activeId");
       const finish = () => {
         if (all.readyState !== "done" || active.readyState !== "done") return;
-        const stored = (all.result as Notebook[]).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        const stored = (all.result as NotebookSummary[]).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
         const notes = stored.filter((n) => !n.deletedAt), trash = stored.filter((n) => !!n.deletedAt);
-        if (!notes.length) { const note = newNotebook(); tx.objectStore("notebooks").put(note); notes.push(note); }
+        let created: Notebook | undefined;
+        if (!notes.length) { created = newNotebook(); putNote(tx, created); notes.push(summarizeNotebook(created)); }
         const selected = notes.find((n) => n.id === active.result) ?? notes[0];
         if (active.result !== selected.id) tx.objectStore("workspace").put(selected.id, "activeId");
-        result({ items: notes.map(summarizeNotebook), trash: trash.map(summarizeNotebook), active: selected });
+        if (created) result({ items: notes, trash, active: created });
+        else { const request = tx.objectStore('notebooks').get(selected.id); request.onsuccess = () => result({ items: notes, trash, active: request.result }); }
       };
       all.onsuccess = finish; active.onsuccess = finish;
     }),
@@ -95,14 +148,14 @@ export function createNotebookStore(factory?: IDBFactory) {
       existing.onsuccess = () => {
         // A delayed autosave must not resurrect a recycled notebook or overwrite its contents.
         if ((existing.result as Notebook | undefined)?.deletedAt) { result(false); return; }
-        notes.put(note);
+        putNote(tx, note);
         if (activate) tx.objectStore("workspace").put(note.id, "activeId");
         result(true);
       };
     }),
     select: (id: string) => transaction<void>("readwrite", (tx) => { tx.objectStore("workspace").put(id, "activeId"); }),
     remove: (id: string) => transaction<void>("readwrite", (tx) => {
-      tx.objectStore("notebooks").delete(id);
+      deleteNote(tx, id);
       const workspace = tx.objectStore("workspace"), active = workspace.get("activeId");
       active.onsuccess = () => { if (active.result === id) workspace.delete("activeId"); };
     }),
@@ -110,7 +163,7 @@ export function createNotebookStore(factory?: IDBFactory) {
       const notes = tx.objectStore("notebooks"), req = notes.get(id), workspace = tx.objectStore("workspace");
       req.onsuccess = () => {
         const note = req.result as Notebook | undefined;
-        if (note && !note.deletedAt) notes.put({ ...note, deletedAt: new Date().toISOString() });
+        if (note && !note.deletedAt) putNote(tx, { ...note, deletedAt: new Date().toISOString() });
       };
       const active = workspace.get("activeId");
       active.onsuccess = () => { if (active.result === id) workspace.delete("activeId"); };
@@ -120,7 +173,7 @@ export function createNotebookStore(factory?: IDBFactory) {
       req.onsuccess = () => {
         const note = req.result as Notebook | undefined;
         if (!note?.deletedAt) return;
-        delete note.deletedAt; notes.put(note);
+        delete note.deletedAt; putNote(tx, note);
       };
     }),
     batch: (ids: readonly string[], action: NotebookBatchAction) => transaction<void>("readwrite", (tx) => {
@@ -131,9 +184,9 @@ export function createNotebookStore(factory?: IDBFactory) {
         req.onsuccess = () => {
           const note = req.result as Notebook | undefined;
           if (!note) return;
-          if (action === "recycle" && !note.deletedAt) notes.put({ ...note, deletedAt });
-          else if (action === "recover" && note.deletedAt) { delete note.deletedAt; notes.put(note); }
-          else if (action === "purge" && note.deletedAt) notes.delete(id);
+          if (action === "recycle" && !note.deletedAt) putNote(tx, { ...note, deletedAt });
+          else if (action === "recover" && note.deletedAt) { delete note.deletedAt; putNote(tx, note); }
+          else if (action === "purge" && note.deletedAt) deleteNote(tx, id);
         };
       }
       if (action === "recycle") {
@@ -147,7 +200,7 @@ export function createNotebookStore(factory?: IDBFactory) {
         const req = notes.get(id);
         req.onsuccess = () => {
           const note = req.result as Notebook | undefined;
-          if (note && !note.deletedAt) notes.put(moveNotebook(note, relation, contact));
+          if (note && !note.deletedAt) putNote(tx, moveNotebook(note, relation, contact));
         };
       }
     }),

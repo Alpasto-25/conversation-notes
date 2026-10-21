@@ -172,6 +172,30 @@ export async function exportNotes(format: "png" | "txt", data: string, page = 1,
   link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   return { saved:true };
 }
+export async function exportBackup(data: string) {
+  return exportDocument(new TextEncoder().encode(data), 'backup', 'json', 'application/json');
+}
+export function exportReport(data: string) { return exportDocument(new TextEncoder().encode(data), 'report', 'md', 'text/markdown'); }
+export function exportImageArchive(bytes: Uint8Array) { return exportDocument(bytes, 'images', 'zip', 'application/zip'); }
+async function exportDocument(bytes: Uint8Array, kind: 'backup' | 'report' | 'images', extension: string, mime: string) {
+  if (!bytes.length || bytes.length > 64 * 1024 * 1024) throw new Error('导出文件需小于 64 MB。');
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-');
+  const name = `conversation-notes-${kind}-${stamp}.${extension}`;
+  if (!isNative) {
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+    const link = document.createElement('a'); link.href = url; link.download = name; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000); return { saved: true };
+  }
+  const { token } = await nativeCall<{ token: string }>('backupBegin', { name, size: bytes.length });
+  try {
+    for (let offset = 0, index = 0; offset < bytes.length; offset += 196608, index++) {
+      let binary = ''; const chunk = bytes.subarray(offset, offset + 196608);
+      for (let at = 0; at < chunk.length; at += 8192) binary += String.fromCharCode(...chunk.subarray(at, at + 8192));
+      await nativeCall('backupChunk', { token, index, data: btoa(binary) });
+    }
+    return await nativeCall<{ saved?: boolean; cancelled?: boolean }>('backupSave', { token }, undefined, 300000);
+  } finally { await nativeCall('backupCancel', { token }).catch(() => {}); }
+}
 export function openOfficialProviderPage(url: string) {
   if (!isOfficialProviderUrl(url)) return Promise.reject(new Error("只允许打开已核对的供应商官方入口。"));
   return nativeCall<{ opened: boolean }>("openExternal", { url });

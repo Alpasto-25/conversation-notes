@@ -1,4 +1,4 @@
-param([switch]$Install)
+param([switch]$Install, [string]$OutputPath)
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $TaskRoot = if ((Split-Path -Leaf (Split-Path -Parent $ProjectRoot)) -eq 'outputs') {
@@ -18,7 +18,8 @@ $BuildRoot = if ($TaskRoot -match '[^\x00-\x7F]') {
 if ($BuildRoot -match '[^\x00-\x7F]') { throw 'Android build tools require an ASCII TEMP path.' }
 $SigningRoot = Join-Path $TaskRoot 'work\android-signing'
 $SigningKey = Join-Path $SigningRoot 'notebook-local.jks'
-$ApkPath = Join-Path $TaskRoot 'outputs\conversation-notes-1.1.4.apk'
+$ApkPath = if ($OutputPath) { [IO.Path]::GetFullPath($OutputPath) } else { Join-Path $TaskRoot 'outputs\conversation-notes-1.1.5.apk' }
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $ApkPath) | Out-Null
 $Adb = Join-Path $SdkRoot 'platform-tools\adb.exe'
 foreach ($RequiredPath in @($AndroidJar, (Join-Path $JavaRoot 'bin\javac.exe'), (Join-Path $BuildTools 'aapt2.exe'))) {
     if (-not (Test-Path -LiteralPath $RequiredPath)) { throw "Missing Android build dependency: $RequiredPath" }

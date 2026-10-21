@@ -23,6 +23,7 @@ import { analysisMode, SEMANTIC_PREFERENCE, readSemanticPreference, SEMANTIC_MOD
 import { runAnalysisQueue } from "../shared/analysis-queue";
 import { addUsage, sameAnalysisModel, type TokenUsage, type AnalysisIdentity } from "../shared/usage";
 import { createAnalysisCache } from "./analysis-cache";
+import { messageDate } from '../shared/message-date';
 import { JEV_TOKEN_BUDGET_ERROR, validateReturnedUsage } from '../shared/provider-contract';
 const pause = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -68,6 +69,8 @@ export function useAnalysis() {
   const [analysisIdentity, setAnalysisIdentity] = useState<AnalysisIdentity>();
   const [usageRestored, setUsageRestored] = useState(false);
   const [semanticNotice, setSemanticNotice] = useState('');
+  const [semanticStatus, setSemanticStatus] = useState<'idle' | 'loading' | 'complete' | 'error'>('idle');
+  const [overviewSource, setOverviewSource] = useState<SavedConversation['overviewSource']>();
   const [semanticUsage, setSemanticUsage] = useState<SavedConversation['semanticUsage']>();
   const [semanticUsageRestored, setSemanticUsageRestored] = useState(false);
   const targetCache = useRef(createAnalysisCache());
@@ -83,7 +86,8 @@ export function useAnalysis() {
     controller.current?.abort();
     // Stopping a complement must not turn completed primary analysis into an unfinished saved record.
     setStatus(completed.current ? "complete" : "idle");
-    setSemanticNotice('');
+    setSemanticNotice(semanticStatus === 'loading' ? '补充分析已暂停，可继续补充。' : '');
+    if (semanticStatus === 'loading') setSemanticStatus('error');
   }
   function reset() {
     cancel();
@@ -100,6 +104,8 @@ export function useAnalysis() {
     setEvents({});
     setTrend([]);
     setOverview(null);
+    setOverviewSource(undefined);
+    setSemanticStatus('idle');
     setOverviewFresh(false);
     setError("");
     setLatency(0);
@@ -129,6 +135,9 @@ export function useAnalysis() {
     setUsageRestored(!!s.analysisUsage);
     setSemanticUsage(s.semanticUsage);
     setSemanticUsageRestored(!!s.semanticUsage);
+    setSemanticStatus(s.semanticState?.status === 'loading' ? 'error' : s.semanticState?.status ?? 'idle');
+    setSemanticNotice(s.semanticState?.status === 'loading' ? '上次补充未完成，可继续补充。' : s.semanticState?.message ?? '');
+    setOverviewSource(s.overviewSource);
     setLines(s.lines);
     setEvents(s.events);
     setTrend(s.trend);
@@ -136,15 +145,17 @@ export function useAnalysis() {
     setOverviewFresh(s.completed);
     setAnalyzedCount(s.analyzedCount);
     setStatus(s.completed ? "complete" : "idle");
+    if (s.analysisTask && s.analysisTask.status !== 'complete') setProgress({ done: s.analysisTask.done, total: s.analysisTask.total });
   }
   async function supplement(messages: Message[], relation: Relation, revision: number, signal: AbortSignal, config: ApiStatus) {
     if (rev.current !== revision || signal.aborted || !semanticEnabledRef.current) return;
     setSemanticNotice('');
     const mode = analysisMode(config, true, semanticModeRef.current), semantic = mode.deepseek, judge = mode.judge;
-    if (mode.error) { setSemanticNotice(mode.error); return; }
+    if (mode.error) { setSemanticStatus('error'); setSemanticNotice(mode.error); return; }
     const all = semanticJobs(messages, relation, revision, savedEvents.current, judge ? JEV_SEMANTIC_BATCH : 12);
     if (!all.some(job => job.targetIds.some(id => savedLines.current[id]?.emotions && !savedLines.current[id].skipped))) return;
     if (!semantic.configured || !semantic.model) {
+      setSemanticStatus('error');
       setSemanticNotice('情绪与意图已保留。请在设置中保存 DeepSeek 补充分析配置，再补充策略与潜台词。');
       return;
     }
@@ -160,12 +171,14 @@ export function useAnalysis() {
       });
       if (targetIds.length) pending.push({ ...job, targetIds });
     }
-    if (rev.current !== revision || !pending.length) return;
+    if (rev.current !== revision) return;
+    if (!pending.length) { setSemanticStatus('complete'); return; }
+    setSemanticStatus('loading');
     const started = performance.now(), startedAt = new Date().toISOString(), runId = crypto.randomUUID();
     let usage: TokenUsage = { input_tokens: 0, output_tokens: 0, requests: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 };
-    let failure = '';
+    let failure = '', unreportedBatches = 0;
     const showUsage = (finished = false) => setSemanticUsage({ ...usage, provider: judge ? 'jev+deepseek' : 'deepseek', model: judge ? `${judge.model} + ${semantic.model}` : semantic.model, run_id: runId,
-      started_at: startedAt, ...(finished ? { finished_at: new Date().toISOString() } : {}), local_targets: reused, elapsed_ms: Math.round(performance.now() - started) });
+      started_at: startedAt, ...(unreportedBatches ? { unreported_batches: unreportedBatches } : {}), ...(finished ? { finished_at: new Date().toISOString() } : {}), local_targets: reused, elapsed_ms: Math.round(performance.now() - started) });
     setSemanticUsageRestored(false);
     setProgress(p => ({ ...p, total: p.total + pending.length }));
     try {
@@ -180,9 +193,10 @@ export function useAnalysis() {
             const missing = job.targetIds.filter(id => !hasCurrentJevJudgment(savedLines.current[id], hash, judge));
             if (missing.length) {
               setSemanticNotice(`Jev 正在判断策略 · ${batch + 1}/${pending.length}`);
+              unreportedBatches++; showUsage();
               const response = await jevJudgmentFetch({ ...job, targetIds: missing }, judge.provider, signal), body = await response.json();
               if (rev.current !== revision) return;
-              if (body.usage) { usage = addUsage(usage, validateReturnedUsage(body.usage)); showUsage(); }
+              if (body.usage) { usage = addUsage(usage, validateReturnedUsage(body.usage)); unreportedBatches--; showUsage(); }
               if (!response.ok) {
                 if (response.status === 400 && body.code === JEV_TOKEN_BUDGET_ERROR && missing.length > 1) {
                   // Retain the same full context and cached judgments; retry only smaller target groups.
@@ -204,9 +218,10 @@ export function useAnalysis() {
             setSemanticNotice(`${needsExplanation ? 'DeepSeek 正在写解释' : '正在保存 Jev 判断'} · ${batch + 1}/${pending.length}`);
           }
           const guidance = judge ? Object.fromEntries(job.targetIds.map(id => [id, savedLines.current[id].semanticJudgment!])) : undefined;
+          unreportedBatches++; showUsage();
           const response = await semanticsFetch({ ...job, ...(guidance ? { jevJudgments: guidance } : {}) }, signal), body = await response.json();
           if (rev.current !== revision) return;
-          if (body.usage) { usage = addUsage(usage, validateReturnedUsage(body.usage)); showUsage(); }
+          if (body.usage) { usage = addUsage(usage, validateReturnedUsage(body.usage)); unreportedBatches--; showUsage(); }
           const data: SemanticResponse | undefined = response.ok ? body : body.partial;
           if (data) {
             if (data.revision !== revision || data.rubricVersion !== RUBRIC || data.contextHash !== hash || data.model !== semantic.model
@@ -228,6 +243,7 @@ export function useAnalysis() {
     } finally {
       if (rev.current === revision) {
         showUsage(true);
+        setSemanticStatus(failure ? 'error' : 'complete');
         setSemanticNotice(failure ? `${failure} 可仅重试策略与潜台词。` : '');
       }
     }
@@ -288,7 +304,7 @@ export function useAnalysis() {
     const startedAt = new Date().toISOString(), runId = crypto.randomUUID();
     const deepseek = provider === 'deepseek';
     let usage: TokenUsage = { input_tokens: 0, output_tokens: 0, requests: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 };
-    let localTargets = 0;
+    let localTargets = 0, unreportedBatches = 0;
     setAnalysisUsage(undefined);
     if (!append || previous.messages.length !== messages.length) setFailedAnalysisUsage(undefined);
     setAnalysisIdentity(identity);
@@ -350,6 +366,7 @@ export function useAnalysis() {
     setProgress({ done: 0, total: jobs.length + 2 });
     function showUsage(finished = false) {
       const summary = { ...usage, provider, model, run_id: runId, started_at: startedAt,
+        ...(unreportedBatches ? { unreported_batches: unreportedBatches } : {}),
         ...(finished ? { finished_at: new Date().toISOString() } : {}),
         local_targets: localTargets, elapsed_ms: Math.round(performance.now() - started) };
       setAnalysisUsage(summary);
@@ -357,10 +374,11 @@ export function useAnalysis() {
     }
     async function execute(job: AnalysisRequest, stage: string, batch = 0) {
       let data: AnalysisResponse | undefined;
-      let failureMessage: string | undefined, usageRecorded = false;
+      let failureMessage: string | undefined, usageRecorded = false, outstanding = false;
       function recordUsage(returned: TokenUsage) {
         usage = addUsage(usage, { ...returned,
           ...(returned.details ? { details: returned.details.map(d => ({ ...d, stage, batch })) } : {}) });
+        if (outstanding) { unreportedBatches--; outstanding = false; }
         showUsage();
         usageRecorded = true;
       }
@@ -373,6 +391,7 @@ export function useAnalysis() {
       }
       for (let attempt = 0; attempt < 4; attempt++) {
         if (data) break;
+        unreportedBatches++; outstanding = true; showUsage();
         const response = await analysisFetch(request, ctrl.signal, semanticEnabledRef.current && analysisMode(config, true, semanticModeRef.current).deepseek.configured ? provider : undefined);
         const body = await response.json();
         if (rev.current !== revision) return;
@@ -417,6 +436,9 @@ export function useAnalysis() {
       if (job.task !== 'overview' && data.lines?.some(line => !job.targetIds.includes(line.id)))
         throw new Error("返回消息与当前批次不匹配，请重试");
       if (rev.current !== revision) return;
+      data.lines = data.lines?.map(line => ({ ...line, analysisContext: { hash, provider, model, rubric: RUBRIC,
+        task: job.task, targetIds: job.targetIds, at: line.analysisContext?.at ?? new Date().toISOString(), messageIds: job.messages.map(m => m.id), fullScene: deepseek && job.task === 'other_messages' && messages.length <= 100 && job.messages.length === messages.length,
+        distant: !!job.memory?.some(e => job.targetIds.includes(e.id)) } }));
       if (deepseek && missing.length) await targetCache.current.put(job, data.lines ?? [], provider, model);
       if (rev.current !== revision) return;
       localTargets += Object.keys(cached).length;
@@ -424,6 +446,7 @@ export function useAnalysis() {
       showUsage();
       if (data.overview) {
         setOverview(data.overview);
+        setOverviewSource({ provider, model, at: new Date().toISOString(), messageIds: job.messages.map(m => m.id), provisional: true });
         setLatency(Math.round(performance.now() - started));
       }
       const added = Object.fromEntries(
@@ -506,6 +529,7 @@ export function useAnalysis() {
     const finalUsage = showUsage(true);
     if (failed) setFailedAnalysisUsage(finalUsage);
     setOverviewFresh(!!final?.overview && !failed);
+    if (final?.overview && !failed) setOverviewSource({ provider, model, at: new Date().toISOString(), messageIds: finalJob.messages.map(m => m.id), provisional: false });
     if (final?.overview && !failed) {
       completed.current = true;
       processed.current = messages.length;
@@ -515,6 +539,9 @@ export function useAnalysis() {
           at: new Date().toISOString(),
           value: final.overview!.affinity.value,
           count: messages.length,
+          provider, model, rubric: RUBRIC, relation,
+          chatFrom: messages.map(m => messageDate(m.timestamp)).filter((d): d is string => !!d).sort()[0],
+          chatTo: messages.map(m => messageDate(m.timestamp)).filter((d): d is string => !!d).sort().at(-1),
         };
         return old.at(-1)?.count === point.count
           ? [...old.slice(0, -1), point]
@@ -545,6 +572,8 @@ export function useAnalysis() {
     analysisIdentity,
     usageRestored,
     semanticNotice,
+    semanticStatus,
+    overviewSource,
     semanticUsage,
     semanticUsageRestored,
     supplementOnly,

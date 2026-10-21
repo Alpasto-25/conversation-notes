@@ -18,8 +18,8 @@ using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
 [assembly: System.Reflection.AssemblyTitle("对话手记")]
-[assembly: System.Reflection.AssemblyVersion("1.1.4.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.4.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.5.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.5.0")]
 
 namespace ConversationNotes
 {
@@ -214,6 +214,57 @@ namespace ConversationNotes
                 File.WriteAllBytes(picker.FileName, bytes); return new { saved = true };
             }
         }
+    }
+
+    internal sealed class BackupExport : IDisposable
+    {
+        private MemoryStream content;
+        private string token, name;
+        private int expected, next;
+        internal object Begin(Dictionary<string, object> payload)
+        {
+            Dispose(); name = Json.Text(payload, "name"); object size;
+            if (!Regex.IsMatch(name, "^conversation-notes-(backup-[0-9]{8}-[0-9]{6}\\.json|report-[0-9]{8}-[0-9]{6}\\.md|images-[0-9]{8}-[0-9]{6}\\.zip)$")
+                || !payload.TryGetValue("size", out size) || !(size is int) || (int)size <= 0 || (int)size > 64 * 1024 * 1024)
+                throw new ApiException(400, "备份内容或大小无效。");
+            expected = (int)size; next = 0; content = new MemoryStream(); token = Guid.NewGuid().ToString();
+            return new { token = token };
+        }
+        private void Check(Dictionary<string, object> payload)
+        {
+            if (content == null || Json.Text(payload, "token") != token) throw new ApiException(400, "备份传输已失效，请重新导出。");
+        }
+        internal object Chunk(Dictionary<string, object> payload)
+        {
+            Check(payload); object index; string data = Json.Text(payload, "data");
+            if (!payload.TryGetValue("index", out index) || !(index is int) || (int)index != next || data.Length > 262144)
+                throw new ApiException(400, "备份片段顺序或大小无效。");
+            byte[] bytes;
+            try { bytes = Convert.FromBase64String(data); } catch { throw new ApiException(400, "备份片段无效。"); }
+            if (bytes.Length == 0 || bytes.Length > 196608 || content.Length + bytes.Length > expected) throw new ApiException(400, "备份大小无效。");
+            content.Write(bytes, 0, bytes.Length); next++; return new { saved = true };
+        }
+        internal object Save(IWin32Window owner, Dictionary<string, object> payload)
+        {
+            Check(payload);
+            if (content.Length != expected) throw new ApiException(400, "备份传输未完成。");
+            try {
+                string extension = Path.GetExtension(name).Substring(1);
+                using (SaveFileDialog picker = new SaveFileDialog { Title = "保存手记文件", FileName = name,
+                    Filter = "手记文件|*." + extension, DefaultExt = extension, AddExtension = true, OverwritePrompt = true }) {
+                    if (picker.ShowDialog(owner) != DialogResult.OK) return new { cancelled = true };
+                    using (FileStream output = new FileStream(picker.FileName, FileMode.Create, FileAccess.Write)) WriteTo(output);
+                    return new { saved = true };
+                }
+            } finally { Dispose(); }
+        }
+        internal void WriteTo(Stream output)
+        {
+            if (content == null || content.Length != expected) throw new ApiException(400, "备份传输未完成。");
+            content.Position = 0; content.CopyTo(output);
+        }
+        internal object Cancel(Dictionary<string, object> payload) { if (Json.Text(payload, "token") == token) Dispose(); return new { cancelled = true }; }
+        public void Dispose() { if (content != null) content.Dispose(); content = null; token = null; }
     }
 
     internal static class OfficialLinks
@@ -539,6 +590,7 @@ namespace ConversationNotes
         private readonly ConfigStore config;
         private readonly ModelClient model;
         private readonly ReleaseClient releases;
+        private readonly BackupExport backups = new BackupExport();
         private readonly ConcurrentDictionary<string, CancellationTokenSource> jobs = new ConcurrentDictionary<string, CancellationTokenSource>();
         internal NotebookWindow(string dataRoot, HttpClient testingClient = null, HttpClient testingReleaseClient = null)
         {
@@ -564,7 +616,7 @@ namespace ConversationNotes
             Shown += async delegate { await Initialize(); };
             FormClosing += delegate { foreach (CancellationTokenSource job in jobs.Values) job.Cancel(); };
             SystemEvents.UserPreferenceChanged += OnSystemPreferenceChanged;
-            FormClosed += delegate { SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged; web.Dispose(); model.Dispose(); releases.Dispose(); };
+            FormClosed += delegate { SystemEvents.UserPreferenceChanged -= OnSystemPreferenceChanged; backups.Dispose(); web.Dispose(); model.Dispose(); releases.Dispose(); };
         }
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr window, int attribute, ref int value, int size);
@@ -685,6 +737,10 @@ namespace ConversationNotes
                 }
                 else if (method == "configure") result = config.Configure(payload);
                 else if (method == "exportNotes") result = NoteExport.Save(this, payload);
+                else if (method == "backupBegin") result = backups.Begin(payload);
+                else if (method == "backupChunk") result = backups.Chunk(payload);
+                else if (method == "backupSave") result = backups.Save(this, payload);
+                else if (method == "backupCancel") result = backups.Cancel(payload);
                 else if (method == "importConfig")
                 {
                     using (OpenFileDialog picker = new OpenFileDialog { Title = "选择旧版项目的 .env 配置文件", Filter = "环境配置文件|.env;*.env|所有文件|*.*", CheckFileExists = true })

@@ -40,7 +40,7 @@ test("migration rollback leaves version-one records intact on transaction failur
   const originalOpen = factory.open.bind(factory);
   factory.open = ((name: string, version?: number) => {
     const req = originalOpen(name, version);
-    if (version === 2) req.addEventListener("upgradeneeded", () => req.transaction!.abort(), { once: true });
+    if (version === 3) req.addEventListener("upgradeneeded", () => req.transaction!.abort(), { once: true });
     return req;
   }) as typeof factory.open;
   await assert.rejects(createNotebookStore(factory).loadLibrary());
