@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { MODEL_OPTIONS, defaultModel, supportsModel } from '../shared/models';
+import { MODEL_OPTIONS, PROVIDER_NAMES, defaultModel, supportsModel } from '../shared/models';
 import type { SemanticMode } from '../shared/analysis-mode';
 import { ToggleSelect } from './ToggleSelect';
 import type { ModelSelection } from './ModelSelector';
@@ -13,7 +13,7 @@ import {
   type ApiStatus,
 } from "./platform";
 
-const PROVIDERS = { typesafe: 'TypeSafe', vercel: 'Vercel AI Gateway', openrouter: 'OpenRouter', deepseek: 'DeepSeek（官方）' };
+const PROVIDERS = PROVIDER_NAMES;
 function ModelConfiguration({ status, changed, selection, disabled, providers, activate, title, keyLabel, saveLabel }: {
   status: ApiStatus | null;
   changed: (status: ApiStatus) => void;
@@ -53,7 +53,8 @@ function ModelConfiguration({ status, changed, selection, disabled, providers, a
     setFeedbackError(false);
     setFeedback("正在连接模型服务…");
     try {
-      setFeedback(`连接成功 · ${await checkMobileConnection(provider)}`);
+      const result = await checkMobileConnection(provider);
+      setFeedback(`连接成功 · ${result.name || result.provider || '当前平台'} · ${result.model}`);
     } catch (error) {
       setFeedbackError(true);
       setFeedback(error instanceof Error ? error.message : "连接失败");

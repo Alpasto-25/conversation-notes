@@ -6,9 +6,14 @@ import { ProviderError, validateResult, jevBudgetErrorCode } from "../shared/pro
 import { deepseekRequest, deepseekEnvelope, evaluateCausalDeepseek, type DeepseekRequest } from '../shared/deepseek';
 export { ProviderError, validateResult } from "../shared/provider-contract";
 
-export function providerErrorMessage(error: unknown): string {
+export function providerErrorMessage(error: unknown, fallbackName = '') {
   if (error instanceof ProviderError) return error.message;
-  return "连接超时或网络不可达，请检查网络后重试。 / Connection failed or timed out.";
+  const name = fallbackName ? `${fallbackName}：` : '';
+  return `${name}连接超时或网络不可达，请检查网络后重试。 / Connection failed or timed out.`;
+}
+// Transport failures must name the platform that was actually called.
+export function providerFailureMessage(name: string, timedOut: boolean) {
+  return `${name}：${timedOut ? "等待返回超时，请检查网络或代理后重试。 / Timed out" : "无法连接，请检查网络或代理后重试。 / Connection failed"}`;
 }
 
 function httpError(status: number, name: string, code?: ProviderError['providerCode']) {
@@ -49,18 +54,26 @@ async function evaluateOnce(payload: SystemOneRequest<Questions> & { deepseekMes
   const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
   for (let attempt = 0; ; attempt++) {
     requestSignal.throwIfAborted();
-    const response = await fetchImpl(config.endpoint, {
-      method: "POST",
-      redirect: "error",
-      headers: {
-        Authorization: `Bearer ${config.apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(config.provider === 'deepseek' ? payload.deepseekMessages
-        ? { model: config.model, stream: false, thinking: { type: 'disabled' }, max_tokens: 4096, response_format: { type: 'json_object' }, messages: payload.deepseekMessages }
-        : deepseekRequest(payload, config.model) : { state: payload.state, questions: payload.questions, model: config.model }),
-      signal: AbortSignal.any([requestSignal, AbortSignal.timeout(config.provider === 'deepseek' ? 60000 : 30000)]),
-    });
+    let response: Response;
+    try {
+      response = await fetchImpl(config.endpoint, {
+        method: "POST",
+        redirect: "error",
+        headers: {
+          Authorization: `Bearer ${config.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(config.provider === 'deepseek' ? payload.deepseekMessages
+          ? { model: config.model, stream: false, thinking: { type: 'disabled' }, max_tokens: 4096, response_format: { type: 'json_object' }, messages: payload.deepseekMessages }
+          : deepseekRequest(payload, config.model) : { state: payload.state, questions: payload.questions, model: config.model }),
+        signal: AbortSignal.any([requestSignal, AbortSignal.timeout(config.provider === 'deepseek' ? 60000 : 30000)]),
+      });
+    } catch (error) {
+      // A stop the user asked for stays an abort; anything else is this platform failing.
+      if (signal?.aborted) throw error;
+      const timedOut = requestSignal.aborted;
+      throw new ProviderError(timedOut ? 504 : 502, providerFailureMessage(config.name, timedOut));
+    }
     if (!response.ok) {
       // Do not surface provider bodies: they may echo credentials or chat text.
       let code: ProviderError['providerCode'];

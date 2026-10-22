@@ -19,6 +19,7 @@ import { ChatMessage } from "./ChatMessage";
 import { SemanticDetail } from './SemanticDetail';
 import { SemanticSwitch } from './SemanticSwitch';
 import { analysisMode, type SemanticMode } from '../shared/analysis-mode';
+import { providerName } from '../shared/models';
 import { IconButton } from "./IconButton";
 import { dismissNotebookDrag } from "./useNotebookDrag";
 import type { ShareSource } from "./share-content";
@@ -180,14 +181,16 @@ function Modal({
     </div>
   );
 }
-function AnalysisModeSelector({ mode, change, disabled, field = false, label }: {
-  mode: SemanticMode; change: (mode: SemanticMode) => void; disabled: boolean; field?: boolean; label?: string;
+function AnalysisModeSelector({ mode, change, disabled, field = false, label, jevPlatform }: {
+  mode: SemanticMode; change: (mode: SemanticMode) => void; disabled: boolean; field?: boolean; label?: string; jevPlatform?: string;
 }) {
   const name = label || (field ? '分析组合' : '分析方式');
+  // Say which platform actually judges, so a failure can be traced to it.
+  const jev = jevPlatform ? `Jev（${jevPlatform}）+ DeepSeek` : 'Jev + DeepSeek';
   return <label className={field ? 'field analysis-mode-control' : 'scene-control model-control'}>
     <span>{name}</span><ToggleSelect className={field ? '' : 'scene-select model-select'} aria-label={name}
       value={mode} disabled={disabled} onChange={value => change(value as SemanticMode)}>
-      <option value="deepseek">仅 DeepSeek</option><option value="jev-deepseek">Jev + DeepSeek</option>
+      <option value="deepseek">仅 DeepSeek</option><option value="jev-deepseek">{jev}</option>
     </ToggleSelect>
   </label>;
 }
@@ -584,6 +587,8 @@ export default function App() {
   const analysisSelection = apiInfo ? analysisMode(apiInfo, a.semanticEnabled, a.semanticMode) : null;
   const primaryAnalysis = analysisSelection?.primary;
   const selectedMode = analysisSelection?.selectedMode ?? a.semanticMode ?? 'deepseek';
+  // Resolve the Jev platform even while "仅 DeepSeek" is active, so the combo stays explicit.
+  const jevPlatform = providerName(apiInfo ? analysisMode(apiInfo, true, 'jev-deepseek').judge?.provider : '');
   return (
     <main className={`app${isDesktop ? " desktop-app" : ""}${reading.expanded ? " is-chat-reading" : ""}`}>
       <div ref={workspace} className="workspace">
@@ -748,7 +753,7 @@ export default function App() {
                     ))}
                   </ToggleSelect>
                 </label>
-                {a.semanticEnabled ? <AnalysisModeSelector mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !ready || !apiInfo} />
+                {a.semanticEnabled ? <AnalysisModeSelector mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !ready || !apiInfo} jevPlatform={jevPlatform} />
                   : isNative && <ModelSelector status={apiInfo} disabled={busy || !ready} changed={setApiInfo}
                     notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
                 <span className="save-badge">
@@ -1023,7 +1028,7 @@ export default function App() {
               ))}
             </ToggleSelect>
           </label>
-          {a.semanticEnabled ? <AnalysisModeSelector field label="本次分析组合" mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !apiInfo} />
+          {a.semanticEnabled ? <AnalysisModeSelector field label="本次分析组合" mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !apiInfo} jevPlatform={jevPlatform} />
             : isNative && <ModelSelector field status={apiInfo} disabled={busy} changed={setApiInfo} pendingChanged={setImportModelSaving}
               notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
           <div className="role-options">
@@ -1106,7 +1111,7 @@ export default function App() {
         <Modal title="API 配置" close={() => setSettings(false)}>
           <SemanticSwitch enabled={a.semanticEnabled} change={a.changeSemanticEnabled} disabled={busy} />
           {a.semanticEnabled && <>
-            <AnalysisModeSelector mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !apiInfo} field />
+            <AnalysisModeSelector mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !apiInfo} field jevPlatform={jevPlatform} />
             <p>{selectedMode === 'deepseek' ? '基础分析、表达方式判断和潜台词均由 DeepSeek 完成。' : 'Jev 完成判断，DeepSeek 根据判断写潜台词。'} 切换只影响后续分析，已有结果保留。</p>
             {analysisSelection?.error && <p role="status">{analysisSelection.error}</p>}
           </>}

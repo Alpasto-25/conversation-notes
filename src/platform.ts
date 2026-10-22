@@ -2,6 +2,7 @@ import type { AnalysisRequest } from "../shared/types";
 import { ProviderError, analysisFailureDetails } from "../shared/provider-contract";
 import { evaluateWithDeepseekRepair, evaluateCausalDeepseek, nativeDeepseekPayload, type DeepseekRequest } from "../shared/deepseek";
 import { isOfficialProviderUrl } from "../shared/provider-guides";
+import { providerName } from "../shared/models";
 import { RELEASES_URL, QUARK_DOWNLOAD_URL, type BuildInfo } from "../shared/updates";
 import { analyzeSemantics, semanticFailureDetails, semanticGuidanceSchema, type SemanticRequest } from '../shared/semantics';
 import { analyzeJevSemantics } from '../shared/semantic-judgment';
@@ -9,10 +10,14 @@ import type { AnalysisConfiguration } from '../shared/analysis-mode';
 export { semanticConfiguration } from '../shared/analysis-mode';
 
 declare const __APP_BUILD_INFO__: BuildInfo;
-export const APP_BUILD = __APP_BUILD_INFO__;
+// Vite injects the real build info; only unit tests that import this module see the stub.
+export const APP_BUILD: BuildInfo = typeof __APP_BUILD_INFO__ === "undefined"
+  ? { schema: 1, platform: "web", version: "0.0.0", buildId: "test-build-00000000", builtAt: "2026-01-01T00:00:00.000Z" }
+  : __APP_BUILD_INFO__;
 
-export const isMobile = import.meta.env.MODE === "mobile";
-export const isDesktop = import.meta.env.MODE === "desktop";
+// Vite injects import.meta.env; outside a Vite build (unit tests) it is absent.
+export const isMobile = import.meta.env?.MODE === "mobile";
+export const isDesktop = import.meta.env?.MODE === "desktop";
 export const isNative = isMobile || isDesktop;
 export type ApiStatus = AnalysisConfiguration;
 type NativeBridge = {
@@ -90,7 +95,9 @@ function nativeCall<T>(
     const timer = setTimeout(() => {
       bridge.cancel(id);
       finish();
-      reject(new Error(method === "exportNotes" ? "保存等待超时，请重新导出。" : "连接超时，请检查网络后重试。"));
+      const request = payload as { provider?: string; purpose?: string } | null;
+      const platform = method === "evaluate" ? providerName(request?.purpose === "semantics" ? "deepseek" : request?.provider) : "";
+      reject(new Error(method === "exportNotes" ? "保存等待超时，请重新导出。" : `${platform ? `${platform}：` : ""}连接超时，请检查网络后重试。`));
     }, timeout);
     pending.set(id, {
       resolve: (value) => {
@@ -237,11 +244,13 @@ export async function checkMobileConnection(provider?: string) {
       instructions: "Does the text mention the sky?",
     },
   };
+  // The test must hit the platform picked in the settings, not whatever is
+  // currently active; without a purpose the native layer falls back to the active one.
   const result = await evaluateWithDeepseekRepair({
       state: "This is a connection test. The sky is blue.",
       questions,
-    }, (payload, signal) => nativeCall("evaluate", { ...nativeDeepseekPayload(payload), ...(provider ? { provider } : {}) }, signal));
-  return result.model;
+    }, (payload, signal) => nativeCall("evaluate", { ...nativeDeepseekPayload(payload), purpose: "primary", ...(provider ? { provider } : {}) }, signal));
+  return { provider: provider || '', name: providerName(provider), model: result.model };
 }
 export async function analysisFetch(job: AnalysisRequest, signal: AbortSignal, provider?: string) {
   if (!isNative)

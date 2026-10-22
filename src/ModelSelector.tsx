@@ -11,8 +11,10 @@ export function ModelSelector({ status, disabled, changed, configure, notice, pe
 }) {
   const [saving, setSaving] = useState(false);
   useEffect(() => { pendingChanged?.(saving); return () => pendingChanged?.(false); }, [saving, pendingChanged]);
-  const provider = status?.provider || 'typesafe';
-  const model = supportsModel(provider, status?.model || '') ? status!.model! : defaultModel(provider);
+  // Never assume TypeSafe: an unknown or missing platform must stay visibly unknown.
+  const provider = status?.provider || '';
+  const known = MODEL_OPTIONS.some(option => option.provider === provider);
+  const model = known ? (supportsModel(provider, status?.model || '') ? status!.model! : defaultModel(provider)) : '';
   async function select(value: string) {
     const option = MODEL_OPTIONS.find(item => `${item.provider}:${item.model}` === value);
     if (!option) return;
@@ -27,8 +29,9 @@ export function ModelSelector({ status, disabled, changed, configure, notice, pe
     finally { setSaving(false); }
   }
   return <label className={field ? "field import-model-control" : "scene-control model-control"}><span>{field ? "本次分析模型" : "模型"}</span>
-    <ToggleSelect className={field ? "" : "scene-select model-select"} aria-label={field ? "本次分析模型" : "分析模型"} value={`${provider}:${model}`}
-      disabled={disabled || saving || !status} onChange={value => void select(value)}>
+    <ToggleSelect className={field ? "" : "scene-select model-select"} aria-label={field ? "本次分析模型" : "分析模型"} value={known ? `${provider}:${model}` : ''}
+      disabled={disabled || saving || !known} onChange={value => void select(value)}>
+      {!known && <option value="">{status ? '所选平台未配置' : '正在读取模型配置…'}</option>}
       {MODEL_OPTIONS.map(option => <option key={`${option.provider}:${option.model}`} value={`${option.provider}:${option.model}`}>{option.label}</option>)}
     </ToggleSelect>
   </label>;

@@ -431,7 +431,17 @@ namespace ConversationNotes
                     {
                         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", key);
                         request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-                        using (HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token))
+                        HttpResponseMessage pending;
+                        try { pending = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token); }
+                        catch (OperationCanceledException)
+                        {
+                            if (deadline.IsCancellationRequested && !token.IsCancellationRequested)
+                                throw new ApiException(504, ProviderName(provider) + "：等待返回超时，请检查网络或代理后重试。");
+                            throw;
+                        }
+                        catch (System.Net.Http.HttpRequestException)
+                        { throw new ApiException(502, ProviderName(provider) + "：无法连接，请检查网络或代理后重试。"); }
+                        using (HttpResponseMessage response = pending)
                         {
                             int code = (int)response.StatusCode;
                             if (!response.IsSuccessStatusCode)
@@ -450,14 +460,14 @@ namespace ConversationNotes
                                     catch { /* Unrecognized bodies keep the generic failure. */ }
                                 }
                                 throw new ApiException(code >= 400 && code < 600 ? code : 502,
-                                    errorCode == null ? ErrorMessage(code, provider) : provider + "：当前判断请求过大，请缩小聊天范围后重试。", errorCode);
+                                    errorCode == null ? ErrorMessage(code, provider) : ProviderName(provider) + "：当前判断请求过大，请缩小聊天范围后重试。", errorCode);
                             }
                             try {
                                 Dictionary<string, object> value = Json.Decode(await ReadBody(response, deadline.Token));
                                 return provider == "deepseek" ? DeepseekResult(value, attempt + 1) : value;
                             }
                             catch (OperationCanceledException) { throw; }
-                            catch { throw new ApiException(502, "模型返回格式异常，请重试。"); }
+                            catch { throw new ApiException(502, ProviderName(provider) + "：返回格式异常，请重试。"); }
                         }
                     }
                 }
@@ -566,6 +576,15 @@ namespace ConversationNotes
             return value != null && value.TryGetValue("detail", out detail) && detail is Dictionary<string, object>
                 && Json.Text((Dictionary<string, object>)detail, "error_type") == "max_tokens_exceeded" ? "max_tokens_exceeded" : null;
         }
+        // Show the platform the user picked, never a raw id and never another platform's name.
+        internal static string ProviderName(string provider)
+        {
+            if (provider == "deepseek") return "DeepSeek";
+            if (provider == "typesafe") return "TypeSafe";
+            if (provider == "vercel") return "Vercel AI Gateway";
+            if (provider == "openrouter") return "OpenRouter";
+            return provider ?? "";
+        }
         private static string ErrorMessage(int code, string provider)
         {
             string reason = code == 401 ? "Key 无效或已过期，请在设置中更新。"
@@ -576,7 +595,7 @@ namespace ConversationNotes
                 : code == 429 ? "请求受限，请稍后重试并检查账号限额。"
                 : code == 400 || code == 422 ? "请求未被接受，请检查配置或缩小范围。"
                 : "模型服务暂不可用，请稍后重试。";
-            return provider + "：" + reason;
+            return ProviderName(provider) + "：" + reason;
         }
         public void Dispose() { client.Dispose(); }
     }

@@ -1,28 +1,28 @@
-import { normalizeModel, supportsModel } from '../shared/models';
+import { PROVIDER_NAMES, normalizeModel, supportsModel } from '../shared/models';
 export const PROVIDERS = {
   typesafe: {
-    name: "TypeSafe",
+    name: PROVIDER_NAMES.typesafe,
     endpoint: "https://api.typesafe.ai/v1/systemone",
     model: "jev-1.13.0",
     keyEnv: "TYPESAFE_API_KEY",
     keyUrl: "https://console.typesafe.ai/",
   },
   vercel: {
-    name: "Vercel AI Gateway",
+    name: PROVIDER_NAMES.vercel,
     endpoint: "https://ai-gateway.vercel.sh/typesafe/v1/systemone",
     model: "typesafe-ai/jev",
     keyEnv: "AI_GATEWAY_API_KEY",
     keyUrl: "https://vercel.com/d?to=/%5Bteam%5D/~/ai-gateway/api-keys",
   },
   openrouter: {
-    name: "OpenRouter",
+    name: PROVIDER_NAMES.openrouter,
     endpoint: "https://openrouter.ai/api/alpha/decisions",
     model: "typesafe/jev-1.13",
     keyEnv: "OPENROUTER_API_KEY",
     keyUrl: "https://openrouter.ai/settings/keys",
   },
   deepseek: {
-    name: 'DeepSeek', endpoint: 'https://api.deepseek.com/chat/completions',
+    name: PROVIDER_NAMES.deepseek, endpoint: 'https://api.deepseek.com/chat/completions',
     model: 'deepseek-flash', keyEnv: 'DEEPSEEK_API_KEY', keyUrl: 'https://platform.deepseek.com/api_keys',
   },
 } as const;

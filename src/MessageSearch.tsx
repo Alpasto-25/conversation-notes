@@ -26,7 +26,7 @@ export function MessageSearch({ initialQuery, notebookId, open }: {
     <div className="search-filters"><label className="field">发送人<ToggleSelect aria-label="搜索发送人" value={sender || ''} onChange={v => setSender(v as SearchFilter['sender'])}><option value="">双方</option><option value="self">我</option><option value="other">对方</option></ToggleSelect></label>
       <label className="field">开始日期<input type="date" value={from} onChange={e => setFrom(e.target.value)} /></label>
       <label className="field">结束日期<input type="date" value={to} onChange={e => setTo(e.target.value)} /></label></div>
-    <label><input type="checkbox" checked={favorites} onChange={e => setFavorites(e.target.checked)} /> 只找收藏的原话（可不填关键词）</label>
+    <label className="search-favorites"><input type="checkbox" checked={favorites} onChange={e => setFavorites(e.target.checked)} /><span>只找收藏的原话（可不填关键词）</span></label>
     <p role="status">{busy ? '正在查找…' : error || (query.trim() || favorites ? `找到 ${hits.length}${hits.length === 200 ? '（先显示前 200 条，请缩小范围）' : ''} 条` : '输入原话中的关键词。')}</p>
     {(from || to) && <p className="folder-help">日期筛选只包含有完整年月日的消息。</p>}
     <div className="message-search-results">{!busy && hits.map(hit => <button className="search-result" key={`${hit.notebookId}:${hit.messageId}`} onClick={() => open(hit, hits, query)}>

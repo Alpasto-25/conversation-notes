@@ -14,6 +14,8 @@ A two-person text conversation analyzer for Windows and Android.
 
 ## 1.1.5 update (2026-10-21)
 
+The 2026-10-22 repair build keeps version 1.1.5. It aligns the search checkbox and notebook follow-up controls, names the actual provider in failures, and restores Android input keyboard behavior. Earlier builds receive an update reminder using the new build IDs; install over the existing application to retain local data.
+
 Version 1.1.5 includes optional encrypted backups, restore previews, full-text search, message edits and undo, analysis versions, historical usage, import corrections, export redaction, image ZIPs, Markdown reports, and personal notes, with Windows and Android release packages.
 
 Paste, preview, correct identities/ranges, then explicitly choose save-only or analysis. Previews do not call a model. Cost estimates state their assumptions; requests without returned usage remain unknown. Restoring an analysis version preserves the usage ledger. Each device keeps its own data and API keys; backups exclude keys.

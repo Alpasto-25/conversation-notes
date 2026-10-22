@@ -14,7 +14,9 @@ import {
   validateResult,
   ProviderError,
   providerErrorMessage,
+  providerFailureMessage,
 } from "../server/provider";
+import { providerLabel, providerName } from "../shared/models";
 import { updateConfiguration, saveConfiguration } from "../scripts/setup";
 import { analyze, buildRequest } from "../server/analysis";
 import type { AnalysisRequest } from "../shared/types";
@@ -439,4 +441,32 @@ test("三平台贯通总览、对方情绪意图、我方评级，使用同一�
     assert.deepEqual(results[0], results[1]);
     assert.deepEqual(results[0], results[2]);
   }
+});
+
+test('平台显示名统一映射，未知平台不冒充 TypeSafe', () => {
+  assert.equal(providerName('typesafe'), 'TypeSafe');
+  assert.equal(providerName('Vercel'), 'Vercel AI Gateway');
+  assert.equal(providerName('openrouter'), 'OpenRouter');
+  assert.equal(providerName('deepseek'), 'DeepSeek');
+  assert.equal(providerName(''), '');
+  assert.equal(providerName(undefined), '');
+  assert.equal(providerName('custom-gateway'), 'custom-gateway');
+  assert.equal(providerLabel(''), '未选择平台');
+});
+
+test('连接失败与超时都写明真正被调用的平台，不回落到 TypeSafe', async () => {
+  const vercel = getProviderConfig({ JEV_PROVIDER: 'vercel', AI_GATEWAY_API_KEY: 'synthetic-vercel-key' });
+  assert.equal(vercel.name, 'Vercel AI Gateway');
+  const offline: typeof fetch = async () => { throw new TypeError('fetch failed'); };
+  await assert.rejects(() => evaluate(payload, undefined, vercel, offline), error => {
+    assert.ok(error instanceof ProviderError);
+    assert.equal(error.status, 502);
+    assert.match(error.message, /^Vercel AI Gateway：无法连接/);
+    assert.doesNotMatch(error.message, /TypeSafe/);
+    return true;
+  });
+  assert.match(providerFailureMessage('OpenRouter', true), /^OpenRouter：等待返回超时/);
+  assert.match(providerFailureMessage('DeepSeek', false), /^DeepSeek：无法连接/);
+  assert.match(providerErrorMessage(new Error('private-chat-or-key'), 'TypeSafe'), /^TypeSafe：连接超时/);
+  assert.doesNotMatch(providerErrorMessage(new Error('private-chat-or-key'), 'TypeSafe'), /private-chat-or-key/);
 });

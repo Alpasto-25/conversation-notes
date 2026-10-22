@@ -8,6 +8,7 @@ import { ProviderError, providerErrorMessage, evaluateSemanticPayload, evaluate 
 import { analyzeSemantics, semanticFailureDetails, semanticGuidanceSchema } from '../shared/semantics';
 import { analyzeJevSemantics } from '../shared/semantic-judgment';
 import { analysisFailureDetails } from '../shared/provider-contract';
+import { providerName } from '../shared/models';
 import { createReleaseChecker } from "./updates";
 const app = express();
 app.disable("x-powered-by");
@@ -95,12 +96,14 @@ app.post(["/api/analyze", "/api/semantics", "/api/semantic-judgment"], async (re
       : await analyze(valid.data, controller.signal, req.body.analysisProvider));
   } catch (error) {
     const code = Number((error as { status?: number }).status) || 502;
+    // Name the platform that actually failed, so a failure is never blamed on another one.
+    const failedName = providerName(judgment ? req.body.judgeProvider : req.body.analysisProvider || process.env.JEV_PROVIDER);
     if (!res.headersSent && !controller.signal.aborted)
       res.status(code >= 400 && code < 600 ? code : 502).json({
         error:
           error instanceof ConfigurationError || error instanceof ProviderError
             ? error.message
-            : providerErrorMessage(error),
+            : providerErrorMessage(error, failedName),
         ...analysisFailureDetails(error),
         ...semanticFailureDetails(error),
         ...(error instanceof ProviderError && error.providerCode ? { code: error.providerCode } : {}),

@@ -2,9 +2,10 @@ import { useState } from 'react';
 import type { Trend } from './storage';
 import { RELATIONS } from '../shared/types';
 import { ToggleSelect } from './ToggleSelect';
+import { providerName } from '../shared/models';
 export function AnalysisTimeline({ points }: { points: Trend[] }) {
   const all = [...new Map(points.map(point => [`${point.at}:${point.model}:${point.count}`, point])).values()].sort((a, b) => a.at.localeCompare(b.at));
-  const family = (p: Trend) => p.model && p.rubric && p.relation ? `${p.provider} · ${p.model} · ${RELATIONS[p.relation]} · ${p.rubric}` : '旧记录（来源不完整，不连线）';
+  const family = (p: Trend) => p.model && p.rubric && p.relation ? `${providerName(p.provider) || '来源未知'} · ${p.model} · ${RELATIONS[p.relation]} · ${p.rubric}` : '旧记录（来源不完整，不连线）';
   const groups = [...new Set(all.map(family))], [selected, setSelected] = useState(groups.at(-1) || '');
   const group = groups.includes(selected) ? selected : groups.at(-1), rows = all.filter(p => family(p) === group), plotted = rows.filter(p => p.value !== null && p.model && p.rubric && p.relation).slice(-50);
   const x = (i: number) => 32 + i / Math.max(1, plotted.length - 1) * 520, y = (p: Trend) => 152 - p.value! * 1.3;

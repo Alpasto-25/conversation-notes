@@ -1,3 +1,18 @@
+// One source of truth for platform ids and the names users see. Never map an
+// unknown id to a real platform: a wrong name hides which service failed.
+export const PROVIDER_NAMES: Record<string, string> = {
+  typesafe: 'TypeSafe',
+  vercel: 'Vercel AI Gateway',
+  openrouter: 'OpenRouter',
+  deepseek: 'DeepSeek',
+};
+export function providerName(value?: string) {
+  const id = (value || '').trim().toLowerCase();
+  return PROVIDER_NAMES[id] || (value || '').trim();
+}
+export function providerLabel(value?: string) {
+  return providerName(value) || '未选择平台';
+}
 export const MODEL_OPTIONS = [
   { provider: 'typesafe', model: 'jev-1.13.0', label: 'Jev · TypeSafe' },
   { provider: 'vercel', model: 'typesafe-ai/jev', label: 'Jev · Vercel' },
