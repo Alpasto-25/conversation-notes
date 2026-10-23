@@ -5,8 +5,9 @@ import { canFillNotebook, fillNotebook, emptyConversation, newNotebook, organize
 import type { useAnalysis } from "./useAnalysis";
 import type { NotebookBackup, RestoreMode } from './backup';
 import { reviseNotebook, undoMessageChange } from './message-edit';
-import { checkpointNotebook, mergeRunHistory, restoreAnalysisVersion } from './analysis-history';
+import { checkpointNotebook, mergeRunHistory, restoreAnalysisVersion, retainCurrentAnalysis, saveAnalysisResults, deleteAnalysisVersion } from './analysis-history';
 import { updatePersonalNotebook, type PersonalNotes } from './personal-notes';
+import type { AnalysisUsage } from '../shared/usage';
 
 export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
   const [messages, setMessages] = useState<Message[]>([]), [input, setInput] = useState("");
@@ -24,6 +25,7 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
       .sort((x, y) => y.updatedAt.localeCompare(x.updatedAt)));
   }
   function apply(note: Notebook) {
+    note = retainCurrentAnalysis(note);
     note = { ...note, runHistory: mergeRunHistory(note.runHistory, note.conversation.analysisUsage, note.conversation.semanticUsage, note.conversation.failedAnalysisUsage,
       ...Object.values(note.scenes).flatMap(c => [c.analysisUsage, c.semanticUsage, c.failedAnalysisUsage])) };
     if (readingTimer.current) clearTimeout(readingTimer.current);
@@ -53,12 +55,24 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
     const history = saved?.id === active.id ? saved.runHistory : active.runHistory;
     const runHistory = mergeRunHistory(history, saved?.conversation.analysisUsage, saved?.conversation.semanticUsage, saved?.conversation.failedAnalysisUsage,
       a.analysisUsage, a.semanticUsage, a.failedAnalysisUsage);
-    return { ...active, runHistory, reading: readingAnchor.current, updatedAt: unchanged ? saved.updatedAt : new Date().toISOString(), draft: input, conversation,
-      scenes: { ...scenes.current, [relation]: conversation } };
+    return saveAnalysisResults({ ...active, versions: saved?.id === active.id ? saved.versions : active.versions,
+      runHistory, reading: readingAnchor.current, updatedAt: unchanged ? saved.updatedAt : new Date().toISOString(), draft: input, conversation,
+      scenes: { ...scenes.current, [relation]: conversation } }, a.resultSnapshots);
   }
   function cancelTimer() {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null; pending.current = null;
+  }
+  const latestCapture = useRef(capture);
+  latestCapture.current = capture;
+  async function recordUsage(usage: AnalysisUsage, notebookId: string) {
+    const current = latestCapture.current();
+    const note = current?.id === notebookId ? current : await notebookStore.load(notebookId);
+    if (!note || note.deletedAt) throw new Error('无法保存截图识别用量。');
+    const next = { ...note, runHistory: mergeRunHistory(note.runHistory, usage) };
+    if (current?.id === notebookId) { cancelTimer(); lastSaved.current = next; setActive(next); }
+    try { await persist(next); }
+    catch (error) { setStorageError('截图识别用量保存失败，请勿关闭窗口，可重试保存。'); throw error; }
   }
   async function persist(note: Notebook) { if (!await notebookStore.save(note)) throw new Error("手记已在回收站，停止保存"); if (lastSaved.current?.id === note.id) lastSaved.current = note; updateList(note); }
   function flush() {
@@ -83,7 +97,7 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
     pending.current = capture();
     if (a.status !== 'loading' && timer.current) clearTimeout(timer.current);
     if (a.status !== 'loading' || !timer.current) timer.current = setTimeout(flush, a.status === 'loading' ? 750 : 350);
-  }, [ready, active, messages, input, self, other, relation, a.lines, a.events, a.overview, a.overviewFresh, a.trend, a.analyzedCount, a.status, a.analysisUsage, a.failedAnalysisUsage, a.analysisIdentity, a.semanticUsage, a.semanticStatus, a.semanticNotice, a.overviewSource]);
+  }, [ready, active, messages, input, self, other, relation, a.lines, a.events, a.overview, a.overviewFresh, a.trend, a.analyzedCount, a.status, a.analysisUsage, a.failedAnalysisUsage, a.analysisIdentity, a.semanticUsage, a.semanticStatus, a.semanticNotice, a.overviewSource, a.resultSnapshots]);
   useEffect(() => { if (a.status === 'loading') setWorkspaceNotice(''); }, [a.status]);
   useEffect(() => {
     const hidden = () => {
@@ -223,6 +237,22 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
       const next = restoreAnalysisVersion(note, id); await persist(next); return next;
     });
   }
+  function openVersionCopy(id: string) {
+    return transition(async () => {
+      const saved = await notebookStore.load(active!.id), version = saved?.versions?.find(v => v.id === id);
+      if (!saved || !version) throw new Error('历史结果不存在');
+      const note = newNotebook(structuredClone(version.conversation), `${saved.title.slice(0, 75)} · 历史副本`, saved.contact);
+      note.versions = [structuredClone(version)];
+      await notebookStore.save(note, true); updateList(note); return note;
+    });
+  }
+  function deleteVersion(id: string) {
+    return transition(async () => {
+      const saved = await notebookStore.load(active!.id);
+      if (!saved || saved.deletedAt) throw new Error('手记不存在');
+      const note = deleteAnalysisVersion(saved, id); await persist(note); return note;
+    });
+  }
   function savePersonal(value: PersonalNotes) {
     return transition(async () => {
       const note = await notebookStore.load(active!.id); if (!note || note.deletedAt) throw new Error('手记不存在');
@@ -253,7 +283,8 @@ export function useNotebooks(a: ReturnType<typeof useAnalysis>) {
     return result;
   }
   return { messages, setMessages, input, setInput, self, setSelf, other, setOther, relation,
+    versions: capture()?.versions ?? [],
     runHistory: mergeRunHistory(lastSaved.current?.id === active?.id ? lastSaved.current?.runHistory : active?.runHistory, a.analysisUsage, a.semanticUsage, a.failedAnalysisUsage),
-    active, items, trashItems, ready, storageError, switching, workspaceNotice, snapshot, select, create, canFill, fill,
-    changeRelation, rename, move, recycle, recover, purge, recycleMany, recoverMany, purgeMany, deleteMessages, editMessage, undoMessages, invalidateTargets, checkpointAnalysis, restoreVersion, savePersonal, toggleFavorite, retrySave, exportData, restoreBackup, rememberReading };
+    active, items, trashItems, ready, storageError, switching, workspaceNotice, snapshot, select, create, canFill, fill, recordUsage,
+    changeRelation, rename, move, recycle, recover, purge, recycleMany, recoverMany, purgeMany, deleteMessages, editMessage, undoMessages, invalidateTargets, checkpointAnalysis, restoreVersion, openVersionCopy, deleteVersion, savePersonal, toggleFavorite, retrySave, exportData, restoreBackup, rememberReading };
 }

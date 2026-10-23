@@ -13,6 +13,7 @@ import { configuredProfiles, getConfiguredProviderConfig } from '../server/provi
 import { SemanticSwitch } from '../src/SemanticSwitch';
 import { ChatMessage } from '../src/ChatMessage';
 import type { AnalysisRequest, LineResult } from '../shared/types';
+import { matchesReturnedModel } from '../shared/models';
 
 const job: AnalysisRequest = { revision: 1, relation: 'couple', task: 'other_messages', targetIds: ['o'], messages: [
   { id: 's', text: '那早点休息？晚安。', sender: 'self', kind: 'text', timestamp: null },
@@ -62,7 +63,7 @@ test('开关默认关闭并可恢复，说明同时覆盖双平台和仅 DeepSee
   assert.equal(readSemanticPreference({ getItem: () => { throw new Error('unavailable'); } }), false);
   const html = renderToStaticMarkup(createElement(SemanticSwitch, { enabled: false, change: () => {} }));
   assert.match(html, /role="switch"/); assert.doesNotMatch(html, /checked=""/);
-  assert.match(html, /Jev 判断、DeepSeek 写解释/); assert.match(html, /表达方式与潜台词需要 DeepSeek/);
+  assert.match(html, /Jev \/ OpenAI Decisions 判断、DeepSeek 写解释/); assert.match(html, /表达方式与潜台词需要 DeepSeek/);
   assert.ok(html.indexOf('表达方式与潜台词需要 DeepSeek') < html.indexOf('role="switch"'));
 });
 test('双平台开启优先 Jev、关闭保留原模型，切换不改配置', () => {
@@ -138,20 +139,21 @@ test('DeepSeek 接收 Jev 已完成判断和正确原文编号，仅输出文字
     assert.match(payload.deepseekMessages[0].content, /不得重新判断/);
     const content = payload.deepseekMessages[1].content;
     assert.match(content, /失落/); assert.match(content, /回应收到/); assert.match(content, /"evidence_ids":\["0"\]/);
-    return dsPacket({ s0: { subtext: '可能对对方直接结束聊天感到失望，希望得到理解。' } });
+    return dsPacket({ s0: { strategy_explanation: '通过追问表达对直接结束聊天的不满。', subtext: '可能对对方直接结束聊天感到失望，希望得到理解。' } });
   });
   assert.deepEqual(answer.lines[0].communicationStrategies, decision.communicationStrategies);
   assert.equal(answer.lines[0].semanticConfidence, decision.semanticConfidence);
   assert.equal(answer.lines[0].semanticAnalysis.judgeModel, judge.model);
-  await assert.rejects(() => analyzeSemantics(input, async () => dsPacket({ s0: { subtext: '试图重新分类', confidence: .99 } })), SemanticFailure);
+  await assert.rejects(() => analyzeSemantics(input, async () => dsPacket({ s0: { strategy_explanation: '通过追问表达对直接结束聊天的不满。', subtext: '试图重新分类', confidence: .99 } })), SemanticFailure);
 });
-test('Jev 无潜台词或证据不足时直接显示其结论，不让 DeepSeek 猜测也不调用它', async () => {
+test('Jev 无潜台词或证据不足时 DeepSeek 只解释策略，不生成潜台词', async () => {
   for (const [status, confidence] of [['none', .9], ['supported', .4]] as const) {
     const result = await analyzeJevSemantics(job, 'typesafe', async payload => jevPacket(payload, status, confidence));
     const input = { ...job, jevJudgments: { o: result.lines[0].semanticJudgment } };
     let calls = 0;
-    const response = await analyzeSemantics(input, async () => { calls++; throw new Error('must not call'); });
-    assert.equal(calls, 0); assert.equal(response.usage.requests, 0);
+    const response = await analyzeSemantics(input, async () => { calls++; return dsPacket({ s0: { strategy_explanation: '通过追问表达对直接结束聊天的不满。' } }); });
+    assert.equal(calls, Object.keys(input.jevJudgments.o.communicationStrategies).length ? 1 : 0);
+    assert.equal(response.usage.requests, calls);
     assert.deepEqual(validateReturnedUsage(response.usage), response.usage);
     assert.equal(response.lines[0].subtext, status === 'none' ? '无明显潜台词' : '潜台词不确定');
   }
@@ -159,7 +161,7 @@ test('Jev 无潜台词或证据不足时直接显示其结论，不让 DeepSeek 
 test('仅 DeepSeek 时继续完成判断与文字两部分，缓存与双平台分开', async () => {
   const response = await analyzeSemantics(job, async payload => {
     assert.match(payload.deepseekMessages[0].content, /你分析双人对话/);
-    return dsPacket({ s0: { communication_strategy: { protest: .6 }, subtext: '可能期待对方继续回应。', subtext_status: 'supported', confidence: .7, context_dependency: .9, evidence_ids: ['0'] } });
+    return dsPacket({ s0: { communication_strategy: { protest: .6 }, strategy_explanation: '通过追问表达对直接结束聊天的不满。', subtext: '可能期待对方继续回应。', subtext_status: 'supported', confidence: .7, context_dependency: .9, evidence_ids: ['0'] } });
   });
   const line = response.lines[0] as LineResult;
   assert.equal(line.semanticAnalysis?.judgeModel, undefined);
@@ -175,9 +177,36 @@ test('Jev 判断可单独持久化并复用，原文、模型或版本改变不�
   assert.equal(hasCurrentJevJudgment({ ...line, semanticJudgment: { ...line.semanticJudgment!, version: 'old' } as never }, result.contextHash, judge), false);
   await assert.rejects(() => analyzeSemantics({ ...changed, jevJudgments: { o: line.semanticJudgment! } }, async () => { throw new Error('must reject before calling'); }), /Jev 判断与当前原文不匹配/);
 });
+test('OpenRouter Decisions 简称接收带日期版本，保留真实模型并在补充重试和完成后复用', async () => {
+  const selected = { provider: 'openrouter', model: 'openai/gpt-6-luna-decisions' };
+  const snapshot = `${selected.model}-20261006`;
+  assert.equal(matchesReturnedModel(selected.provider, selected.model, snapshot), true);
+  for (const returned of ['openai/gpt-6-luna', 'openai/gpt-6-luna-decisions-other', `${snapshot}-other`, 'typesafe/jev-1.13'])
+    assert.equal(matchesReturnedModel(selected.provider, selected.model, returned), false);
+  assert.equal(matchesReturnedModel('vercel', selected.model, snapshot), false);
+  assert.equal(matchesReturnedModel('openrouter', snapshot, `${selected.model}-20261007`), false);
+  const result = await analyzeJevSemantics(job, selected.provider, async payload => ({ ...jevPacket(payload), model: snapshot }));
+  const decision = result.lines[0].semanticJudgment;
+  assert.equal(result.model, snapshot);
+  assert.equal(result.usage.details?.[0].model, snapshot);
+  assert.equal(hasCurrentJevJudgment(result.lines[0], result.contextHash, selected), true);
+  assert.equal(hasCurrentJevJudgment(result.lines[0], result.contextHash, { ...selected, provider: 'vercel' }), false);
+  assert.equal(hasCurrentJevJudgment(result.lines[0], '0'.repeat(64), selected), false);
+  let explanations = 0;
+  const semantic = await analyzeSemantics({ ...job, jevJudgments: { o: decision } }, async payload => {
+    explanations++;
+    assert.match(payload.deepseekMessages[1].content, /失落/);
+    return dsPacket({ s0: { strategy_explanation: '通过追问表达对直接结束聊天的不满。', subtext: '可能希望对方再多回应自己的情绪。' } });
+  });
+  assert.equal(explanations, 1);
+  assert.equal(semantic.lines[0].semanticAnalysis.judgeModel, snapshot);
+  assert.equal(hasCurrentSemantics(semantic.lines[0] as LineResult, result.contextHash, 'deepseek-flash', selected), true);
+  assert.equal(hasCurrentSemantics(semantic.lines[0] as LineResult, '0'.repeat(64), 'deepseek-flash', selected), false);
+  assert.equal(hasCurrentSemantics(semantic.lines[0] as LineResult, result.contextHash, 'deepseek-flash', { ...selected, model: 'typesafe/jev-1.13' }), false);
+});
 test('关闭开关只隐藏新增层，原文和已保存分析保持不变', async () => {
   const result = await judged(), decision = result.lines[0].semanticJudgment;
-  const semantic = await analyzeSemantics({ ...job, jevJudgments: { o: decision } }, async () => dsPacket({ s0: { subtext: '可能希望自己的情绪被理解。' } }));
+  const semantic = await analyzeSemantics({ ...job, jevJudgments: { o: decision } }, async () => dsPacket({ s0: { strategy_explanation: '通过追问表达对直接结束聊天的不满。', subtext: '可能希望自己的情绪被理解。' } }));
   const line: LineResult = { ...semantic.lines[0], emotions: decision.emotions, intents: decision.intents, score: { value: null, confidence: .7, status: 'ambiguous', probabilities: {} } };
   const before = structuredClone(line);
   const html = renderToStaticMarkup(createElement(ChatMessage, { message: job.messages[1], result: line, self: '我', other: '对方', showTime: false, showSemantics: false }));

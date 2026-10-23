@@ -11,6 +11,7 @@ const requestUsageSchema = z.object({
   started_at: z.string().datetime(), finished_at: z.string().datetime(), elapsed_ms: z.number().nonnegative(),
   request_id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/).optional(),
   input_tokens: z.number().int().nonnegative(), output_tokens: z.number().int().nonnegative(),
+  cost_usd: z.number().finite().nonnegative().optional(),
   prompt_cache_hit_tokens: z.number().int().nonnegative().optional(),
   prompt_cache_miss_tokens: z.number().int().nonnegative().optional(), requests: z.number().int().positive().optional(),
   stage: z.string().optional(), batch: z.number().int().nonnegative().optional(),
@@ -42,6 +43,7 @@ const resultSchema = z.object({
   usage: z.object({
     input_tokens: z.number().int().nonnegative(),
     output_tokens: z.number().int().nonnegative(),
+    cost_usd: z.number().finite().nonnegative().optional(),
     prompt_cache_hit_tokens: z.number().int().nonnegative().optional(),
     prompt_cache_miss_tokens: z.number().int().nonnegative().optional(),
     requests: z.number().int().positive().optional(),
@@ -85,6 +87,7 @@ export function analysisFailureDetails(error: unknown): { usage?: TokenUsage; pa
 }
 // A local result may skip the supplier entirely. Its token counts and request details must be empty.
 const localUsageSchema = resultSchema.shape.usage.extend({
+  cost_usd: z.literal(0).optional(),
   input_tokens: z.literal(0), output_tokens: z.literal(0), requests: z.literal(0),
   prompt_cache_hit_tokens: z.literal(0).optional(), prompt_cache_miss_tokens: z.literal(0).optional(),
   details: z.tuple([]).optional(),

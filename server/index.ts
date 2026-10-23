@@ -10,8 +10,11 @@ import { analyzeJevSemantics } from '../shared/semantic-judgment';
 import { analysisFailureDetails } from '../shared/provider-contract';
 import { providerName } from '../shared/models';
 import { createReleaseChecker } from "./updates";
+import { recognizeScreenshotPayload } from './provider';
+import { screenshotInputSchema } from '../shared/openrouter';
 const app = express();
 app.disable("x-powered-by");
+app.use('/api/screenshot', express.json({ limit: '2mb' }));
 app.use(express.json({ limit: "512kb" }));
 app.use((_req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -29,7 +32,8 @@ let calls = 0;
 let windowAt = Date.now();
 let active = 0;
 const budgets = new Map<string, { count: number; at: number }>();
-app.post(["/api/analyze", "/api/semantics", "/api/semantic-judgment"], async (req, res) => {
+app.post(["/api/analyze", "/api/semantics", "/api/semantic-judgment", '/api/screenshot'], async (req, res) => {
+  const screenshot = req.path === '/api/screenshot';
   const semantics = req.path === '/api/semantics';
   const judgment = req.path === '/api/semantic-judgment';
   const origin = req.headers.origin;
@@ -42,7 +46,8 @@ app.post(["/api/analyze", "/api/semantics", "/api/semantic-judgment"], async (re
     return;
   }
   const valid = requestSchema.safeParse(req.body);
-  if (!valid.success || ((semantics || judgment) && valid.data.task !== 'other_messages')
+  const imageValid = screenshot && screenshotInputSchema.safeParse(req.body).success;
+  if ((!screenshot && !valid.success) || (screenshot && !imageValid) || ((semantics || judgment) && valid.success && valid.data.task !== 'other_messages')
     || (semantics && req.body.jevJudgments !== undefined && !semanticGuidanceSchema.safeParse(req.body.jevJudgments).success)
     || (judgment && !['typesafe', 'vercel', 'openrouter'].includes(req.body.judgeProvider))) {
     res.status(400).json({ error: "聊天结构或长度不符合要求，请校正后重试" });
@@ -50,7 +55,7 @@ app.post(["/api/analyze", "/api/semantics", "/api/semantic-judgment"], async (re
   }
   let configuration;
   try {
-    const selected = judgment ? req.body.judgeProvider : req.body.analysisProvider;
+    const selected = screenshot ? screenshotInputSchema.parse(req.body).provider : judgment ? req.body.judgeProvider : req.body.analysisProvider;
     configuration = semantics ? { ...semanticProviderStatus(), error: '请单独配置 DeepSeek 的 DEEPSEEK_API_KEY 后补充策略与潜台词。' }
       : selected ? { configured: true, ...getConfiguredProviderConfig(selected) } : providerStatus();
   } catch (error) { res.status(503).json({ error: error instanceof ConfigurationError ? error.message : '模型配置不可用。' }); return; }
@@ -90,6 +95,8 @@ app.post(["/api/analyze", "/api/semantics", "/api/semantic-judgment"], async (re
     if (!res.writableEnded) controller.abort();
   });
   try {
+    if (screenshot) { res.json(await recognizeScreenshotPayload(req.body, controller.signal, getConfiguredProviderConfig(screenshotInputSchema.parse(req.body).provider))); return; }
+    if (!valid.success) return;
     res.json(semantics ? await analyzeSemantics({ ...valid.data, ...(req.body.jevJudgments !== undefined ? { jevJudgments: req.body.jevJudgments } : {}) }, evaluateSemanticPayload, controller.signal)
       : judgment ? await analyzeJevSemantics(valid.data, req.body.judgeProvider,
         (payload, signal) => evaluate(payload, signal, getConfiguredProviderConfig(req.body.judgeProvider)), controller.signal)
@@ -97,7 +104,7 @@ app.post(["/api/analyze", "/api/semantics", "/api/semantic-judgment"], async (re
   } catch (error) {
     const code = Number((error as { status?: number }).status) || 502;
     // Name the platform that actually failed, so a failure is never blamed on another one.
-    const failedName = providerName(judgment ? req.body.judgeProvider : req.body.analysisProvider || process.env.JEV_PROVIDER);
+    const failedName = providerName(screenshot ? screenshotInputSchema.parse(req.body).provider : judgment ? req.body.judgeProvider : req.body.analysisProvider || process.env.JEV_PROVIDER);
     if (!res.headersSent && !controller.signal.aborted)
       res.status(code >= 400 && code < 600 ? code : 502).json({
         error:

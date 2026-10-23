@@ -18,6 +18,7 @@ export function privateShareSource(source: ShareSource, privacy: SharePrivacy): 
   return { title: redact(source.title), conversation: { ...c, self: privacy.aliases ? '我' : c.self, other: privacy.aliases ? '对方' : c.other,
     messages: c.messages.map(m => ({ ...m, text: redact(m.text), timestamp: privacy.hideTime ? null : m.timestamp })),
     lines: Object.fromEntries(Object.entries(c.lines).map(([id, line]) => [id, { ...line,
+      ...(line.strategyExplanation !== undefined ? { strategyExplanation: redact(line.strategyExplanation) } : {}),
       ...(line.subtext !== undefined ? { subtext: redact(line.subtext) } : {}), ...(line.skipped ? { skipped: redact(line.skipped) } : {}) }])),
     overview: c.overview ? { ...c.overview, alternative: c.overview.alternative ? redact(c.overview.alternative) : c.overview.alternative } : null,
   } };

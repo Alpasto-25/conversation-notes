@@ -117,7 +117,7 @@ namespace ConversationNotes
             Check(Json.Text(store.ProviderConfig("deepseek"), "apiKey") == deepKey, "DeepSeek-only mode reads its own saved key");
             Reject(() => store.ProviderConfig("unsupported"), 400, "routed primary accepts only fixed providers");
             store.Configure(Input("typesafe", ""));
-            Reject(() => store.Configure(new Dictionary<string, object> { { "provider", "openrouter" }, { "apiKey", "synthetic-key" }, { "activate", false } }), 400, "secondary config cannot select arbitrary providers");
+            Reject(() => store.Configure(new Dictionary<string, object> { { "provider", "vercel" }, { "apiKey", "synthetic-key" }, { "activate", false } }), 400, "auxiliary config is limited to screenshot and explanation providers");
             string legacyFolder = Path.Combine(folder, "legacy");
             ConfigStore legacy = new ConfigStore(legacyFolder);
             byte[] legacyBytes = System.Security.Cryptography.ProtectedData.Protect(System.Text.Encoding.UTF8.GetBytes(Json.Encode(new { provider = "typesafe", apiKey = TestKey })),
@@ -144,6 +144,55 @@ namespace ConversationNotes
             Check(Json.Text(store.Read(), "apiKey") == TestKey, "explicit replacement repairs config");
             foreach (string provider in new[] { "typesafe", "vercel", "openrouter" })
                 Check(ModelClient.Endpoint(provider).StartsWith("https://"), "fixed HTTPS endpoint");
+            ConfigStore visionStore = new ConfigStore(Path.Combine(folder, "vision-config"));
+            var openaiConfig = Input("openrouter", TestKey); openaiConfig["model"] = "openai/gpt-6-luna-decisions";
+            visionStore.Configure(openaiConfig);
+            Check(Json.Text(visionStore.Read(), "model") == "openai/gpt-6-luna-decisions", "OpenAI Decisions model persists without changing the platform key");
+            Reject(() => ConfigStore.Model("typesafe", "openai/gpt-6-luna-decisions"), 400, "OpenAI model is restricted to its configured platform");
+            Dictionary<string, object> imagePayload = new Dictionary<string, object> { { "image", "data:image/jpeg;base64,/9j/2Q==" }, { "selfSide", "left" } };
+            foreach (string invalidImage in new[] { "https://example.org/private.jpg", "data:image/svg+xml;base64,AAAA", "data:image/jpeg;base64,AAAA", new string('a', 1400001) }) {
+                var badImage = new Dictionary<string, object>(imagePayload); badImage["image"] = invalidImage;
+                Reject(() => ModelClient.ScreenshotImage(badImage), 400, "screenshot rejects remote URLs, invalid media and excessive input");
+            }
+            FakeHttp visionHandler = new FakeHttp();
+            using (ModelClient visionClient = new ModelClient(visionStore, new HttpClient(visionHandler))) {
+                visionHandler.Run = async (request, token) => {
+                    Dictionary<string, object> sent = Json.Decode(await request.Content.ReadAsStringAsync());
+                    Check(request.RequestUri.AbsoluteUri == ModelClient.Endpoint("openrouter"), "OpenAI decision uses fixed native Decisions endpoint");
+                    Check(Json.Text(sent, "model") == "openai/gpt-6-luna-decisions" && sent.ContainsKey("state") && !sent.ContainsKey("messages"), "OpenAI decision retains structured scoring contract");
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"model\":\"openai/gpt-6-luna-decisions\",\"answers\":{},\"usage\":{\"input_tokens\":80,\"output_tokens\":0,\"cost\":0.000008}}") };
+                };
+                Check(Json.Encode(await visionClient.Evaluate(Payload(), CancellationToken.None)).Contains("0.000008"), "decision reported cost passes through native transport");
+                visionHandler.Run = async (request, token) => {
+                    Dictionary<string, object> sent = Json.Decode(await request.Content.ReadAsStringAsync());
+                    Check(request.RequestUri.AbsoluteUri == "https://openrouter.ai/api/v1/chat/completions", "screenshot uses fixed vision endpoint");
+                    Check(Json.Text(sent, "model") == "openai/gpt-6-luna" && !sent.ContainsKey("questions"), "screenshot uses generation model rather than Decisions");
+                    Check(request.Headers.Authorization.Parameter == TestKey, "screenshot reuses encrypted OpenRouter key");
+                    Check(Json.Encode(sent["messages"]).Contains("data:image/jpeg;base64,/9j/2Q=="), "screenshot image stays in intended vision request");
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"cost\":0.000002}}") };
+                };
+                Check(Json.Encode(await visionClient.RecognizeScreenshot(imagePayload, CancellationToken.None)).Contains("prompt_tokens"), "screenshot returns actual token usage");
+                Check(Json.Text(visionStore.Read(), "model") == "openai/gpt-6-luna-decisions", "screenshot does not replace active analysis model");
+                visionHandler.Run = (request, token) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.PaymentRequired) { Content = new StringContent(TestKey) });
+                try { await visionClient.RecognizeScreenshot(imagePayload, CancellationToken.None); throw new Exception("Expected screenshot 402"); }
+                catch (ApiException error) { Check(error.Status == 402 && !error.Message.Contains(TestKey), "screenshot failure redacts upstream bodies"); }
+                var dsConfig = Input("deepseek", "synthetic-vision-ds-key"); dsConfig["activate"] = false;
+                visionStore.Configure(dsConfig);
+                var dsImage = new Dictionary<string, object>(imagePayload); dsImage["provider"] = "deepseek";
+                visionHandler.Run = async (request, token) => {
+                    var sent = Json.Decode(await request.Content.ReadAsStringAsync());
+                    Check(request.RequestUri.AbsoluteUri == "https://api.deepseek.com/chat/completions", "DeepSeek screenshot uses fixed official endpoint");
+                    Check(Json.Text(sent, "model") == "deepseek-flash" && !sent.ContainsKey("reasoning") && Json.Encode(sent["thinking"]).Contains("disabled"), "DeepSeek screenshot uses vision capable Flash without OpenRouter fields");
+                    Check(request.Headers.Authorization.Parameter == "synthetic-vision-ds-key", "DeepSeek screenshot reads only its encrypted profile key");
+                    Check(Json.Encode(sent["messages"]).Contains("data:image/jpeg;base64,/9j/2Q=="), "DeepSeek receives selected JPEG");
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"model\":\"deepseek-flash\",\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":5,\"prompt_cache_hit_tokens\":10,\"prompt_cache_miss_tokens\":10}}") };
+                };
+                Check(Json.Encode(await visionClient.RecognizeScreenshot(dsImage, CancellationToken.None)).Contains("prompt_cache_hit_tokens"), "DeepSeek screenshot preserves cache billing");
+                Check(Json.Text(visionStore.Read(), "provider") == "openrouter" && Json.Text(visionStore.Read(), "model") == "openai/gpt-6-luna-decisions", "OCR does not change active judgment configuration");
+                dsImage["provider"] = "typesafe";
+                try { await visionClient.RecognizeScreenshot(dsImage, CancellationToken.None); throw new Exception("Expected vision provider rejection"); }
+                catch (ApiException error) { Check(error.Status == 400, "unknown screenshot provider rejected before network"); }
+            }
             FakeHttp handler = new FakeHttp();
             handler.Run = async (request, token) => {
                 Check(request.RequestUri.AbsoluteUri == ModelClient.Endpoint("typesafe"), "native endpoint");
@@ -198,7 +247,7 @@ namespace ConversationNotes
                     Dictionary<string, object> sent = Json.Decode(await request.Content.ReadAsStringAsync());
                     Check(request.RequestUri.AbsoluteUri == ModelClient.Endpoint("deepseek") && request.Headers.Authorization.Parameter == deepKey, "semantic transport uses DeepSeek endpoint and its separate key");
                     Check(Json.Text(store.Read(), "provider") == "typesafe" && Json.Text(store.Read(), "apiKey") == TestKey, "semantic transport does not switch the active model");
-                    Check(Json.Encode(sent["messages"]) == Json.Encode(prepared) && Convert.ToInt32(sent["max_tokens"]) == 4096, "semantic transport forwards shared prompt with bounded output");
+                    Check(Json.Encode(sent["messages"]) == Json.Encode(prepared) && Convert.ToInt32(sent["max_tokens"]) == 8192, "semantic transport forwards shared prompt with bounded output");
                     return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(Json.Encode(new {
                         model = "deepseek-flash", choices = new[] { new { finish_reason = "stop", message = new { content = "{\"analyses\":{}}" } } }, usage = new { prompt_tokens = 5, completion_tokens = 3 }
                     })) };

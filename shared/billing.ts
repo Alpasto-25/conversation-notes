@@ -14,7 +14,7 @@ const HOLIDAYS_2026 = [['01-01', '01-03'], ['02-15', '02-23'], ['04-04', '04-06'
 type TimedUsage = TokenUsage & { started_at?: string; finished_at?: string };
 export type FeeEstimate = { min: number; max: number; missingCache: boolean; uncertainTime: boolean };
 export type ModelUsage = TokenUsage & {
-  model: string; kind: 'deepseek' | 'jev' | 'other'; records: TimedUsage[]; fee?: FeeEstimate;
+  model: string; kind: 'deepseek' | 'jev' | 'openai' | 'other'; records: TimedUsage[]; fee?: FeeEstimate;
 };
 export function deepseekRate(model: string) {
   if (['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-v4.1-flash'].includes(model)) return DEEPSEEK_RATES.flash;
@@ -69,7 +69,7 @@ export function estimateDeepseekFee(model: string, records: TimedUsage[]): FeeEs
 export function summarizeModelUsage(values: (AnalysisUsage | undefined)[]) {
   const models = new Map<string, ModelUsage>();
   let unattributed = false;
-  const kind = (model: string): ModelUsage['kind'] => model.startsWith('deepseek-') ? 'deepseek' : /jev/i.test(model) ? 'jev' : 'other';
+  const kind = (model: string): ModelUsage['kind'] => model.startsWith('deepseek-') ? 'deepseek' : /jev/i.test(model) ? 'jev' : /^(openai\/)?gpt-/i.test(model) ? 'openai' : 'other';
   function add(model: string, record: TimedUsage) {
     const split = cacheSplit(record);
     const normalized = { ...record, prompt_cache_hit_tokens: split?.hit, prompt_cache_miss_tokens: split?.miss };
@@ -81,6 +81,8 @@ export function summarizeModelUsage(values: (AnalysisUsage | undefined)[]) {
     const runModels = run.model?.split(' + ') ?? [];
     for (const model of runModels) if (!models.has(model)) models.set(model, { model, kind: kind(model), input_tokens: 0, output_tokens: 0, records: [] });
     const details = run.details ?? [];
+    // No returned usage is an unknown charge, including failed vision requests.
+    if (run.unreported_batches && !run.input_tokens && !run.output_tokens && !details.length) continue;
     for (const detail of details) add(detail.model, detail);
     const covered = details.reduce((sum, d) => ({ input: sum.input + d.input_tokens, output: sum.output + d.output_tokens }), { input: 0, output: 0 });
     if ((!details.length && (runModels.length === 1 || run.input_tokens || run.output_tokens)) || covered.input !== run.input_tokens || covered.output !== run.output_tokens) {
@@ -88,6 +90,8 @@ export function summarizeModelUsage(values: (AnalysisUsage | undefined)[]) {
       const sumCache = (key: 'prompt_cache_hit_tokens' | 'prompt_cache_miss_tokens') =>
         run[key] !== undefined && details.every(d => d[key] !== undefined) ? run[key]! - details.reduce((sum, d) => sum + d[key]!, 0) : undefined;
       add(runModels[0], { input_tokens: run.input_tokens - covered.input, output_tokens: run.output_tokens - covered.output,
+        ...(run.cost_usd !== undefined && (!details.length || details.every(d => d.cost_usd !== undefined))
+          ? { cost_usd: run.cost_usd - details.reduce((sum, d) => sum + (d.cost_usd ?? 0), 0) } : {}),
         prompt_cache_hit_tokens: sumCache('prompt_cache_hit_tokens'), prompt_cache_miss_tokens: sumCache('prompt_cache_miss_tokens'),
         requests: run.requests !== undefined && details.every(d => d.requests !== undefined) ? run.requests - details.reduce((sum, d) => sum + d.requests!, 0) : undefined,
         started_at: run.started_at, finished_at: run.finished_at });

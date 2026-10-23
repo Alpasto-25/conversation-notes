@@ -19,6 +19,7 @@ export type Notebook = {
   reading?: { messageId: string; offset: number };
   undo?: { at: string; label: string; conversation: SavedConversation; scenes: Notebook['scenes']; reading?: Notebook['reading'] };
   versions?: AnalysisVersion[];
+  deletedAnalysisVersions?: string[];
   runHistory?: AnalysisUsage[];
   annotation?: string;
   pinned?: boolean;

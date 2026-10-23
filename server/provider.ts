@@ -4,6 +4,7 @@ import { getProviderConfig, getSemanticProviderConfig, type ProviderConfig } fro
 import type { SemanticPayload } from '../shared/semantics';
 import { ProviderError, validateResult, jevBudgetErrorCode } from "../shared/provider-contract";
 import { deepseekRequest, deepseekEnvelope, evaluateCausalDeepseek, type DeepseekRequest } from '../shared/deepseek';
+import { normalizeOpenRouterResult, screenshotInputSchema, SCREENSHOT_PROVIDERS, SCREENSHOT_INSTRUCTIONS } from '../shared/openrouter';
 export { ProviderError, validateResult } from "../shared/provider-contract";
 
 export function providerErrorMessage(error: unknown, fallbackName = '') {
@@ -64,7 +65,7 @@ async function evaluateOnce(payload: SystemOneRequest<Questions> & { deepseekMes
           "Content-Type": "application/json",
         },
         body: JSON.stringify(config.provider === 'deepseek' ? payload.deepseekMessages
-          ? { model: config.model, stream: false, thinking: { type: 'disabled' }, max_tokens: 4096, response_format: { type: 'json_object' }, messages: payload.deepseekMessages }
+          ? { model: config.model, stream: false, thinking: { type: 'disabled' }, max_tokens: 8192, response_format: { type: 'json_object' }, messages: payload.deepseekMessages }
           : deepseekRequest(payload, config.model) : { state: payload.state, questions: payload.questions, model: config.model }),
         signal: AbortSignal.any([requestSignal, AbortSignal.timeout(config.provider === 'deepseek' ? 60000 : 30000)]),
       });
@@ -122,8 +123,28 @@ async function evaluateOnce(payload: SystemOneRequest<Questions> & { deepseekMes
     if (config.provider === 'deepseek') {
       const result = deepseekEnvelope(data); result.usage.requests = attempt + 1; return result;
     }
-    return validateResult(data, payload.questions);
+    return validateResult(config.provider === 'openrouter' ? normalizeOpenRouterResult(data) : data, payload.questions);
   }
+}
+
+export async function recognizeScreenshotPayload(input: unknown, signal: AbortSignal, config: ProviderConfig, fetchImpl: typeof fetch = fetch) {
+  const payload = screenshotInputSchema.parse(input);
+  if (config.provider !== payload.provider) throw new ProviderError(400, '截图识别平台与所选配置不一致。');
+  const vision = SCREENSHOT_PROVIDERS[payload.provider];
+  const response = await fetchImpl(vision.endpoint, {
+    method: 'POST', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(75000)]),
+    headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: vision.model, stream: false, max_tokens: 8192,
+      ...(payload.provider === 'deepseek' ? { thinking: { type: 'disabled' } } : { reasoning: { effort: 'none' } }), response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: SCREENSHOT_INSTRUCTIONS }, { role: 'user', content: [
+        { type: 'text', text: `识别聊天原文。${payload.selfSide === 'right' ? '右' : '左'}侧气泡是我（self）。` },
+        { type: 'image_url', image_url: { url: payload.image, detail: 'high' } },
+      ] }] }),
+  });
+  if (!response.ok) { await response.body?.cancel(); throw httpError(response.status, `${vision.label} 截图识别`); }
+  const text = await response.text();
+  if (text.length > 2_000_000) throw new ProviderError(502, '截图识别返回内容过长。');
+  try { return JSON.parse(text); } catch { throw new ProviderError(502, '截图识别返回格式异常。'); }
 }
 
 export async function checkProvider(

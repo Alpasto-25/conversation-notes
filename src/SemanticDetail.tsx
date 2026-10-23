@@ -7,6 +7,7 @@ export function SemanticDetail({ result, messages, locate }: { result?: LineResu
   return <>
     {result.communicationStrategies !== undefined && <>
       <h3 className="intent-detail-heading">对方的表达方式</h3>
+      {result.strategyExplanation && <p className="semantic-explanation"><strong>{result.strategyExplanation}</strong></p>}
       {strategies.map(strategy => <div className="intent-detail-item" key={strategy.key}>
         <div><strong>{strategy.label}</strong></div>
         <p>{strategy.description}</p>

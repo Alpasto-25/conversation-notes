@@ -17,6 +17,7 @@ export const MODEL_OPTIONS = [
   { provider: 'typesafe', model: 'jev-1.13.0', label: 'Jev · TypeSafe' },
   { provider: 'vercel', model: 'typesafe-ai/jev', label: 'Jev · Vercel' },
   { provider: 'openrouter', model: 'typesafe/jev-1.13', label: 'Jev · OpenRouter' },
+  { provider: 'openrouter', model: 'openai/gpt-6-luna-decisions', label: 'OpenAI Decisions · OpenRouter' },
   { provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek Flash' },
 ] as const;
 export type ModelProvider = typeof MODEL_OPTIONS[number]['provider'];
@@ -25,6 +26,12 @@ export function defaultModel(provider: string) {
 }
 export function supportsModel(provider: string, model: string) {
   return MODEL_OPTIONS.some(option => option.provider === provider && option.model === model);
+}
+export function matchesReturnedModel(provider: string, selected: string, returned: string | undefined) {
+  // OpenRouter resolves this rolling alias to a dated snapshot. Keep the actual
+  // returned id in results/usage, and never apply alias matching to other models.
+  return selected === returned || (provider === 'openrouter' && selected === 'openai/gpt-6-luna-decisions'
+    && /^openai\/gpt-6-luna-decisions-\d{8}$/.test(returned || ''));
 }
 export function normalizeModel(provider: string, model: string) {
   return provider === 'deepseek' && model === 'deepseek-v4-pro' ? defaultModel(provider) : model || defaultModel(provider);

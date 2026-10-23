@@ -24,6 +24,7 @@ export type RequestUsage = {
   request_id?: string;
   input_tokens: number;
   output_tokens: number;
+  cost_usd?: number;
   prompt_cache_hit_tokens?: number;
   prompt_cache_miss_tokens?: number;
   requests?: number;
@@ -41,12 +42,15 @@ export type RequestUsage = {
 export type TokenUsage = {
   input_tokens: number;
   output_tokens: number;
+  cost_usd?: number;
   prompt_cache_hit_tokens?: number;
   prompt_cache_miss_tokens?: number;
   requests?: number;
   details?: RequestUsage[];
 };
 export type AnalysisUsage = TokenUsage & {
+  purpose?: 'screenshot' | 'basic' | 'supplement';
+  status?: 'running' | 'complete' | 'partial' | 'paused';
   unreported_batches?: number;
   local_targets: number;
   elapsed_ms: number;
@@ -57,7 +61,11 @@ export type AnalysisUsage = TokenUsage & {
   finished_at?: string;
 };
 export function addUsage(a: TokenUsage, b: TokenUsage): TokenUsage {
+  const zero = (x: TokenUsage) => x.requests === 0 && x.input_tokens === 0 && x.output_tokens === 0;
+  const cost = a.cost_usd !== undefined && b.cost_usd !== undefined ? a.cost_usd + b.cost_usd
+    : zero(a) ? b.cost_usd : zero(b) ? a.cost_usd : undefined;
   return { input_tokens: a.input_tokens + b.input_tokens, output_tokens: a.output_tokens + b.output_tokens,
+    ...(cost !== undefined ? { cost_usd: cost } : {}),
     ...(a.requests !== undefined && b.requests !== undefined ? { requests: a.requests + b.requests } : {}),
     ...(a.prompt_cache_hit_tokens !== undefined && b.prompt_cache_hit_tokens !== undefined
       ? { prompt_cache_hit_tokens: a.prompt_cache_hit_tokens + b.prompt_cache_hit_tokens } : {}),

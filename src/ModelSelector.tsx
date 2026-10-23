@@ -3,7 +3,7 @@ import { ToggleSelect } from './ToggleSelect';
 import { MODEL_OPTIONS, defaultModel, supportsModel } from '../shared/models';
 import { saveMobileConfig, type ApiStatus } from './platform';
 
-export type ModelSelection = { provider: string; model: string };
+export type ModelSelection = { provider: string; model: string; purpose?: 'screenshot' };
 export function ModelSelector({ status, disabled, changed, configure, notice, pendingChanged, field = false }: {
   status: ApiStatus | null; disabled: boolean; changed: (value: ApiStatus) => void;
   configure: (selection: ModelSelection) => void; notice: (text: string) => void;

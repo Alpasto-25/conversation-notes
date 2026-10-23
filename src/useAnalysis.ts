@@ -25,6 +25,8 @@ import { addUsage, sameAnalysisModel, type TokenUsage, type AnalysisIdentity } f
 import { createAnalysisCache } from "./analysis-cache";
 import { messageDate } from '../shared/message-date';
 import { JEV_TOKEN_BUDGET_ERROR, validateReturnedUsage } from '../shared/provider-contract';
+import { matchesReturnedModel } from '../shared/models';
+import type { AnalysisResult } from './analysis-history';
 const pause = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
     const timer = setTimeout(done, ms);
@@ -73,6 +75,9 @@ export function useAnalysis() {
   const [overviewSource, setOverviewSource] = useState<SavedConversation['overviewSource']>();
   const [semanticUsage, setSemanticUsage] = useState<SavedConversation['semanticUsage']>();
   const [semanticUsageRestored, setSemanticUsageRestored] = useState(false);
+  const [resultSnapshots, setResultSnapshots] = useState<AnalysisResult[]>([]);
+  const latestResult = useRef({ overview, trend, analysisUsage, failedAnalysisUsage, analysisIdentity, semanticUsage, overviewSource, semanticStatus, semanticNotice });
+  latestResult.current = { overview, trend, analysisUsage, failedAnalysisUsage, analysisIdentity, semanticUsage, overviewSource, semanticStatus, semanticNotice };
   const targetCache = useRef(createAnalysisCache());
   const rev = useRef(0),
     controller = useRef<AbortController | null>(null),
@@ -81,6 +86,18 @@ export function useAnalysis() {
     savedEvents = useRef(events),
     processed = useRef(0),
     completed = useRef(false);
+  function recordResult(run: NonNullable<SavedConversation['analysisUsage']>, phase: AnalysisResult['phase'], messages: Message[], relation: Relation, patch: Partial<AnalysisResult['conversation']> = {}) {
+    if (!run.run_id) return;
+    const current = latestResult.current;
+    const conversation = { schema: 1 as const, rubric: RUBRIC, messages, relation,
+      lines: savedLines.current, events: savedEvents.current, overview: current.overview, trend: current.trend,
+      analyzedCount: processed.current, completed: completed.current,
+      analysisUsage: current.analysisUsage, failedAnalysisUsage: current.failedAnalysisUsage, analysisIdentity: current.analysisIdentity,
+      semanticUsage: current.semanticUsage, overviewSource: current.overviewSource, targetCache: targetCache.current.snapshot(),
+      semanticState: { status: current.semanticStatus, message: current.semanticNotice },
+      analysisTask: { status: completed.current ? 'complete' as const : 'error' as const, done: 0, total: 0 }, ...patch };
+    setResultSnapshots(old => [...old, { runId: run.run_id!, at: run.finished_at || new Date().toISOString(), phase, conversation: structuredClone(conversation) }]);
+  }
   function cancel() {
     rev.current++;
     controller.current?.abort();
@@ -94,6 +111,7 @@ export function useAnalysis() {
     clearResults();
   }
   function clearResults() {
+    setResultSnapshots([]);
     base.current = null;
     savedLines.current = {};
     savedEvents.current = {};
@@ -177,8 +195,12 @@ export function useAnalysis() {
     const started = performance.now(), startedAt = new Date().toISOString(), runId = crypto.randomUUID();
     let usage: TokenUsage = { input_tokens: 0, output_tokens: 0, requests: 0, prompt_cache_hit_tokens: 0, prompt_cache_miss_tokens: 0 };
     let failure = '', unreportedBatches = 0;
-    const showUsage = (finished = false) => setSemanticUsage({ ...usage, provider: judge ? 'jev+deepseek' : 'deepseek', model: judge ? `${judge.model} + ${semantic.model}` : semantic.model, run_id: runId,
-      started_at: startedAt, ...(unreportedBatches ? { unreported_batches: unreportedBatches } : {}), ...(finished ? { finished_at: new Date().toISOString() } : {}), local_targets: reused, elapsed_ms: Math.round(performance.now() - started) });
+    const showUsage = (finished = false) => {
+      const result = { ...usage, purpose: 'supplement' as const, status: finished ? failure ? 'partial' as const : 'complete' as const : 'running' as const,
+      provider: judge ? 'jev+deepseek' : 'deepseek', model: judge ? `${judge.model} + ${semantic.model}` : semantic.model, run_id: runId,
+      started_at: startedAt, ...(unreportedBatches ? { unreported_batches: unreportedBatches } : {}), ...(finished ? { finished_at: new Date().toISOString() } : {}), local_targets: reused, elapsed_ms: Math.round(performance.now() - started) };
+      setSemanticUsage(result); return result;
+    };
     setSemanticUsageRestored(false);
     setProgress(p => ({ ...p, total: p.total + pending.length }));
     try {
@@ -192,7 +214,7 @@ export function useAnalysis() {
           if (judge) {
             const missing = job.targetIds.filter(id => !hasCurrentJevJudgment(savedLines.current[id], hash, judge));
             if (missing.length) {
-              setSemanticNotice(`Jev 正在判断策略 · ${batch + 1}/${pending.length}`);
+              setSemanticNotice(`决策模型正在判断策略 · ${batch + 1}/${pending.length}`);
               unreportedBatches++; showUsage();
               const response = await jevJudgmentFetch({ ...job, targetIds: missing }, judge.provider, signal), body = await response.json();
               if (rev.current !== revision) return;
@@ -205,17 +227,20 @@ export function useAnalysis() {
                   setProgress(p => ({ ...p, total: p.total + split.length }));
                   continue;
                 }
-                throw new Error(body.error || 'Jev 判断失败，原分析已保留。');
+                throw new Error(body.error || '决策判断失败，原分析已保留。');
               }
               const data = body as JevSemanticResponse;
-              if (data.revision !== revision || data.rubricVersion !== RUBRIC || data.contextHash !== hash || data.model !== judge.model
-                || data.lines.length !== missing.length || data.lines.some(line => !missing.includes(line.id))) throw new Error('Jev 判断与当前模型或原文不匹配。');
+              if (data.revision !== revision || data.rubricVersion !== RUBRIC || data.contextHash !== hash || !matchesReturnedModel(judge.provider, judge.model!, data.model)
+                || data.lines.length !== missing.length || new Set(data.lines.map(line => line.id)).size !== missing.length
+                || data.lines.some(line => !missing.includes(line.id) || !hasCurrentJevJudgment(line, hash, { provider: judge.provider, model: judge.model! })))
+                throw new Error('决策判断与当前模型或原文不匹配。');
               const lines = { ...savedLines.current };
               for (const line of data.lines) if (lines[line.id]) lines[line.id] = { ...lines[line.id], semanticJudgment: line.semanticJudgment };
               savedLines.current = lines; setLines(lines);
             }
-            const needsExplanation = job.targetIds.some(id => savedLines.current[id].semanticJudgment?.subtextStatus === 'supported');
-            setSemanticNotice(`${needsExplanation ? 'DeepSeek 正在写解释' : '正在保存 Jev 判断'} · ${batch + 1}/${pending.length}`);
+            const needsExplanation = job.targetIds.some(id => savedLines.current[id].semanticJudgment?.subtextStatus === 'supported'
+              || Object.keys(savedLines.current[id].semanticJudgment?.communicationStrategies ?? {}).length > 0);
+            setSemanticNotice(`${needsExplanation ? 'DeepSeek 正在写解释' : '正在保存决策判断'} · ${batch + 1}/${pending.length}`);
           }
           const guidance = judge ? Object.fromEntries(job.targetIds.map(id => [id, savedLines.current[id].semanticJudgment!])) : undefined;
           unreportedBatches++; showUsage();
@@ -229,7 +254,7 @@ export function useAnalysis() {
             if (rev.current !== revision) return;
             const lines = { ...savedLines.current };
             for (const line of data.lines) if (lines[line.id]) lines[line.id] = { ...lines[line.id], ...line,
-              contextDependency: line.contextDependency, semanticConfidence: line.semanticConfidence };
+              strategyExplanation: line.strategyExplanation, contextDependency: line.contextDependency, semanticConfidence: line.semanticConfidence };
             savedLines.current = lines;
             setLines(lines);
           }
@@ -242,7 +267,8 @@ export function useAnalysis() {
       }
     } finally {
       if (rev.current === revision) {
-        showUsage(true);
+        const run = showUsage(true);
+        recordResult(run, 'supplement', messages, relation, { semanticUsage: run, semanticState: { status: failure ? 'error' : 'complete', message: failure } });
         setSemanticStatus(failure ? 'error' : 'complete');
         setSemanticNotice(failure ? `${failure} 可仅重试策略与潜台词。` : '');
       }
@@ -365,7 +391,7 @@ export function useAnalysis() {
       done = 0;
     setProgress({ done: 0, total: jobs.length + 2 });
     function showUsage(finished = false) {
-      const summary = { ...usage, provider, model, run_id: runId, started_at: startedAt,
+      const summary = { ...usage, purpose: 'basic' as const, status: finished ? failed ? 'partial' as const : 'complete' as const : 'running' as const, provider, model, run_id: runId, started_at: startedAt,
         ...(unreportedBatches ? { unreported_batches: unreportedBatches } : {}),
         ...(finished ? { finished_at: new Date().toISOString() } : {}),
         local_targets: localTargets, elapsed_ms: Math.round(performance.now() - started) };
@@ -530,11 +556,13 @@ export function useAnalysis() {
     if (failed) setFailedAnalysisUsage(finalUsage);
     setOverviewFresh(!!final?.overview && !failed);
     if (final?.overview && !failed) setOverviewSource({ provider, model, at: new Date().toISOString(), messageIds: finalJob.messages.map(m => m.id), provisional: false });
+    let finalTrend = latestResult.current.trend;
+    const source = final?.overview && !failed ? { provider, model, at: new Date().toISOString(), messageIds: finalJob.messages.map(m => m.id), provisional: false } : latestResult.current.overviewSource;
     if (final?.overview && !failed) {
       completed.current = true;
       processed.current = messages.length;
       setAnalyzedCount(messages.length);
-      setTrend((old) => {
+      {
         const point = {
           at: new Date().toISOString(),
           value: final.overview!.affinity.value,
@@ -543,11 +571,13 @@ export function useAnalysis() {
           chatFrom: messages.map(m => messageDate(m.timestamp)).filter((d): d is string => !!d).sort()[0],
           chatTo: messages.map(m => messageDate(m.timestamp)).filter((d): d is string => !!d).sort().at(-1),
         };
-        return old.at(-1)?.count === point.count
-          ? [...old.slice(0, -1), point]
-          : [...old, point];
-      });
+        const old = latestResult.current.trend;
+        finalTrend = old.at(-1)?.count === point.count ? [...old.slice(0, -1), point] : [...old, point];
+        setTrend(finalTrend);
+      }
     }
+    recordResult(finalUsage, 'basic', messages, relation, { overview: final?.overview || initialOverview?.overview || null,
+      trend: finalTrend, analysisUsage: finalUsage, failedAnalysisUsage: failed ? finalUsage : undefined, analysisIdentity: identity, overviewSource: source });
     if (!failed) await supplement(messages, relation, revision, ctrl.signal, config);
     if (rev.current === revision) setStatus(failed ? 'error' : 'complete');
   }
@@ -576,6 +606,7 @@ export function useAnalysis() {
     overviewSource,
     semanticUsage,
     semanticUsageRestored,
+    resultSnapshots,
     supplementOnly,
     targetCache: targetCache.current.snapshot,
     run,

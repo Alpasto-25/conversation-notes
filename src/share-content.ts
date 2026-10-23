@@ -31,6 +31,7 @@ export function sharedMessages(source: ShareSource, ids: readonly string[], alia
         if (r.intents) { summary.push(`意图：${distribution(r.intents, labels(INTENTS), 3)}`); details.push(`完整意图分布：${distribution(r.intents, labels(INTENTS))}`); }
         if (r.intentVersion) details.push('意图层：表层行为');
         if (r.communicationStrategies !== undefined) summary.push(`对方的表达方式（独立概率）：${distribution(r.communicationStrategies, labels(EXPRESSION_LABELS), 3) || '不确定'}`);
+        if (r.strategyExplanation) summary.push(`表达方式解读：${r.strategyExplanation}`);
         if (r.subtext) summary.push(`潜台词：${r.subtext}`);
         if (r.contextDependency !== undefined) details.push(`上下文依赖度：${percent(r.contextDependency)} [${r.contextDependency}]`);
         if (r.semanticConfidence !== undefined) details.push(`补充分析置信度（模型估计）：${percent(r.semanticConfidence)} [${r.semanticConfidence}]`);

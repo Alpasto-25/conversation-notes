@@ -5,7 +5,7 @@
 [Setup]
 AppId={{BD168B27-1BA2-4D37-9498-5AACBE7583A2}
 AppName=对话手记
-AppVersion=1.1.5
+AppVersion=1.1.6
 AppPublisher=Conversation Notes Local
 DefaultDirName={localappdata}\Programs\ConversationNotes
 DefaultGroupName=对话手记
@@ -14,7 +14,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
 OutputDir={#Output}
-OutputBaseFilename=ConversationNotes-Setup-1.1.5-x64
+OutputBaseFilename=ConversationNotes-Setup-1.1.6-x64
 SetupIconFile={#Payload}\notebook.ico
 UninstallDisplayIcon={app}\ConversationNotes.exe
 UninstallDisplayName=对话手记

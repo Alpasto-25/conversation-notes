@@ -1,4 +1,4 @@
-import { Children, isValidElement, useId, useLayoutEffect, useRef, useState, type ReactNode, type SelectHTMLAttributes } from "react";
+import { Children, createElement, isValidElement, useId, useLayoutEffect, useRef, useState, type ReactNode, type SelectHTMLAttributes } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 import { isMobile } from "./platform";
@@ -8,8 +8,9 @@ let closeCurrent: (() => void) | undefined;
 export function dismissSelect() { if (!closeCurrent) return false; closeCurrent(); return true; }
 type Props = Omit<SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "value" | "multiple"> & {
   value: string; onChange: (value: string) => void; children: ReactNode;
+  truncate?: boolean;
 };
-export function ToggleSelect({ value, onChange, children, ...props }: Props) {
+export function ToggleSelect({ value, onChange, children, truncate = false, ...props }: Props) {
   const [open, setOpen] = useState(false), [position, setPosition] = useState({ left: 0, top: 0, width: 180, maxHeight: 240 });
   const trigger = useRef<HTMLButtonElement>(null), popup = useRef<HTMLDivElement>(null), id = useId();
   const options = Children.toArray(children).filter(child => isValidElement<{ value: string; disabled?: boolean; children: ReactNode }>(child) && child.type === "option")
@@ -42,9 +43,12 @@ export function ToggleSelect({ value, onChange, children, ...props }: Props) {
       document.removeEventListener("scroll", scroll, true); window.removeEventListener("resize", close);
     };
   }, [open, props.disabled, dismiss, reset]);
-  if (!isMobile) return <select {...props} value={value} onChange={event => onChange(event.target.value)}>{children}</select>;
+  if (!isMobile) return <select {...props} value={value} onChange={event => onChange(event.target.value)}>
+    {truncate && <button type="button" className="toggle-select-native-face" tabIndex={-1} aria-hidden="true">{createElement('selectedcontent', { className: 'toggle-select-native-label' })}</button>}
+    {children}
+  </select>;
   return <span className="toggle-select">
-    <button type="button" ref={trigger} id={props.id} className={`toggle-select-trigger ${props.className || ""}`} aria-label={props["aria-label"]}
+    <button type="button" ref={trigger} id={props.id} title={props.title} className={`toggle-select-trigger ${props.className || ""}`} aria-label={props["aria-label"]}
       aria-labelledby={props["aria-labelledby"]} aria-haspopup="listbox" aria-controls={open ? id : undefined} aria-expanded={open && !closing} role="combobox" disabled={props.disabled}
       onClick={() => open ? dismiss() : setOpen(true)} onKeyDown={event => { if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) { event.preventDefault(); if (open && !event.key.startsWith("Arrow")) dismiss(); else setOpen(true); } }}>
       <span className="toggle-select-label">{selected?.children ?? value}</span><ChevronDown className="toggle-select-arrow" size={16} strokeWidth={1.8} aria-hidden="true" />

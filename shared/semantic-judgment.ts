@@ -59,6 +59,7 @@ export async function analyzeJevSemantics(input: AnalysisRequest, provider: stri
   const usage = { ...result.usage, requests: result.usage.requests ?? 1, details: [{ task: 'semantic_judgment', repair: false, model: result.model,
     prompt_family: Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2,'0')).join(''), started_at: startedAt, finished_at: new Date().toISOString(),
     elapsed_ms: Math.round(performance.now()-started), input_tokens: result.usage.input_tokens, output_tokens: result.usage.output_tokens,
+    ...(result.usage.cost_usd !== undefined ? { cost_usd: result.usage.cost_usd } : {}),
     requests: result.usage.requests ?? 1, validation: 'accepted' as const, question_count: Object.keys(payload.questions).length }] };
   return { revision: input.revision, rubricVersion: RUBRIC, contextHash, model: result.model, lines, usage };
 }

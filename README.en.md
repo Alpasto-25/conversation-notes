@@ -7,10 +7,17 @@ A two-person text conversation analyzer for Windows and Android.
 - Read message-by-message emotions, intentions, reply feedback, and suggestions across everyday, family, work, and relationship conversations.
 - Organize local notes in folders and recover deleted notes from the recycle bin.
 - Share selected messages as images or TXT files.
-- Enable optional expression and subtext analysis with DeepSeek alone or Jev + DeepSeek.
-- View concise usage and estimated DeepSeek costs.
+- Enable optional expression and subtext analysis with Jev, DeepSeek, or OpenAI judgments and DeepSeek wording.
+- Import screenshots on both platforms using OpenAI through OpenRouter or DeepSeek Flash, independently of the judgment model.
+- Browse, restore, or delete saved analysis results and view per-run duration and fees.
 
 **The software is free. Bring your own API key; your selected provider charges for model calls.**
+
+## 1.1.6 update (2026-10-23)
+
+Windows and Android now support screenshot transcription with either OpenAI through OpenRouter or DeepSeek Flash. Choose Jev, DeepSeek, or OpenAI Decisions for judgments and DeepSeek for strategy and subtext wording. Per-run duration and fees, saved results, restoration and history deletion are available on both platforms. Jev providers remain independently selectable.
+
+Published following the user's acceptance testing. Functional tests were not repeated during release packaging; build, signing, privacy, installation and publication metadata were checked.
 
 ## 1.1.5 update (2026-10-21)
 
@@ -26,7 +33,7 @@ Ctrl+F searches this notebook, Ctrl+Shift+F searches the library, and F3 / Shift
 
 [Latest GitHub release](https://github.com/Alpasto-25/conversation-notes/releases/latest) · [Quark mirror](https://pan.quark.cn/s/7894e2647abc?pwd=LQxA) (code: LQxA)
 
-**Download 1.1.5 from GitHub. The Quark mirror may still contain an earlier version.**
+**Download 1.1.6 from GitHub. The Quark mirror may still contain an earlier version.**
 
 - **Windows:** run the installer, or extract the portable ZIP and run ConversationNotes.exe.
 - **Android 8.0+:** install the APK.

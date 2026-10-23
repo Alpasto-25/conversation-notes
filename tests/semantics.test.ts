@@ -23,7 +23,7 @@ const job: AnalysisRequest = { relation: 'couple', task: 'other_messages', revis
   { id: 'o', sender: 'other', text: '你真的就晚安了？', kind: 'text', timestamp: null },
 ] };
 const ordinary = { ...job, relation: 'friend' as const, messages: job.messages.map(m => ({ ...m, text: m.sender === 'self' ? '收到后核对一下。' : '嗯。' })) };
-const answer = { communication_strategy: { withdrawal: .71, protest: .63 }, subtext: '可能对对方直接结束聊天感到失望，希望自己的情绪被理解。',
+const answer = { strategy_explanation: '这句先收起交流，再用追问表达对直接收尾的不满。', communication_strategy: { withdrawal: .71, protest: .63 }, subtext: '可能对对方直接结束聊天感到失望，希望自己的情绪被理解。',
   subtext_status: 'supported' as const, context_dependency: .91, confidence: .74, evidence_ids: ['0', '1'] };
 const packet = (analyses: unknown) => deepseekEnvelope({ model: 'deepseek-flash', id: 'synthetic-semantics-1',
   choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ analyses }), reasoning_content: 'PRIVATE_REASONING' } }],
@@ -48,7 +48,7 @@ test('补充层保留独立多标签概率、自由文本、真实用量和原�
 });
 
 test('普通嗯和没事不被固定成负面，证据不足或低把握时撤回确定潜台词', async () => {
-  const normal = await analyzeSemantics(ordinary, async () => packet({ s0: { communication_strategy: { direct: .9 }, subtext_status: 'none' } }));
+  const normal = await analyzeSemantics(ordinary, async () => packet({ s0: { communication_strategy: { direct: .9 }, strategy_explanation: '用简短确认回应收到的信息。', subtext_status: 'none' } }));
   assert.equal(normal.lines[0].subtext, '无明显潜台词'); assert.deepEqual(normal.lines[0].communicationStrategies, { direct: .9 });
   assert.equal(normal.lines[0].semanticConfidence, undefined); assert.equal(normal.lines[0].contextDependency, undefined);
   for (const patch of [{ evidence_ids: ['1'] }, { evidence_ids: [] }, { confidence: .59 }]) {
@@ -63,7 +63,7 @@ test('普通嗯和没事不被固定成负面，证据不足或低把握时撤�
 test('仅 DeepSeek 混合批次先返回状态，无潜台词不需要编写解释或数值，也不重复请求', async () => {
   const batch = { ...ordinary, targetIds: ['o', 'p', 'q'], messages: [...ordinary.messages,
     { ...ordinary.messages[1], id: 'p', text: '你真的就晚安了？' }, { ...ordinary.messages[1], id: 'q', text: '随你。' }] };
-  const compact = { subtext_status: 'none', communication_strategy: { direct: .9 } };
+  const compact = { subtext_status: 'none', communication_strategy: { direct: .9 }, strategy_explanation: '用简短确认回应已收到的信息。' };
   let calls = 0;
   const result = await analyzeSemantics(batch, async () => {
     calls++;
@@ -218,7 +218,7 @@ test('补充请求只用 DeepSeek 专用配置，不借用或更改 Jev Key', as
   const result = await analyzeSemantics(job, (payload, signal) => evaluateSemanticPayload(payload, signal, config, async (_url, init) => {
     calls++; assert.equal(_url, 'https://api.deepseek.com/chat/completions');
     assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer synthetic-deepseek-key');
-    const wire = JSON.parse(String(init?.body)); assert.equal(wire.max_tokens, 4096); assert.equal(wire.messages[0].role, 'system');
+    const wire = JSON.parse(String(init?.body)); assert.equal(wire.max_tokens, 8192); assert.equal(wire.messages[0].role, 'system');
     assert.equal(wire.questions, undefined); assert.equal(wire.purpose, undefined);
     return Response.json({ model: 'deepseek-flash', choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ analyses: { s0: answer } }) } }], usage: { prompt_tokens: 5, completion_tokens: 3 } });
   }));

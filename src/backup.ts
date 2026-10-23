@@ -20,7 +20,7 @@ const line = z.object({ id, score: judgment, emotions: distribution.optional(), 
   intentVersion: z.literal('surface-v1').optional(), replyType: z.string().optional(), replyConfidence: probability.optional(),
   tone: z.string().optional(), tones: distribution.optional(), toneConfidence: probability.optional(),
   event: event.omit({ id: true, status: true, resolvedBy: true }).optional(), communicationStrategies: distribution.optional(),
-  subtext: text.optional(), subtextStatus: z.enum(['supported', 'none', 'uncertain']).optional(),
+  strategyExplanation: z.string().max(1000).optional(), subtext: text.optional(), subtextStatus: z.enum(['supported', 'none', 'uncertain']).optional(),
   contextDependency: probability.optional(), semanticConfidence: probability.optional(), semanticEvidenceIds: z.array(id).optional(),
   semanticAnalysis: z.object({ version: id, model: id, contextHash: id, judgeProvider: id.optional(), judgeModel: id.optional() }).optional(),
   semanticJudgment: z.object({ version: id, provider: id, model: id, contextHash: id, communicationStrategies: distribution,
@@ -31,9 +31,11 @@ const overview = z.object({ affinity: judgment, rapport: judgment.optional(), st
   contextCount: number.optional(), affinityRawValue: number.optional(), boundaryApplied: z.boolean().optional(),
   affinityDimensions: z.array(z.object({ key: id, label: z.string(), weight: number, judgment })).optional() });
 const tokens = z.object({ input_tokens: number, output_tokens: number, prompt_cache_hit_tokens: number.optional(),
-  prompt_cache_miss_tokens: number.optional(), requests: number.optional() });
+  prompt_cache_miss_tokens: number.optional(), requests: number.optional(), cost_usd: z.number().finite().nonnegative().optional() });
 const usage = tokens.extend({ local_targets: number, elapsed_ms: number, provider: id.optional(), model: z.string().optional(),
   unreported_batches: number.optional(),
+  purpose: z.enum(['screenshot', 'basic', 'supplement']).optional(),
+  status: z.enum(['running', 'complete', 'partial', 'paused']).optional(),
   run_id: id.optional(), started_at: date.optional(), finished_at: date.optional(),
   details: z.array(tokens.extend({ model: z.string(), task: z.string(), repair: z.boolean(), prompt_family: z.string(),
     started_at: date, finished_at: date, elapsed_ms: number }).passthrough()).optional() });
@@ -58,7 +60,8 @@ export const notebookSchema = z.object({ schema: z.literal(2), id, title: z.stri
   conversation: savedConversationSchema, scenes: z.record(relation, savedConversationSchema),
   reading: z.object({ messageId: id, offset: number }).optional(),
   undo: z.object({ at: date, label: z.string(), conversation: savedConversationSchema, scenes: z.record(relation, savedConversationSchema), reading: z.object({ messageId: id, offset: number }).optional() }).optional(),
-  versions: z.array(z.object({ id, at: date, label: z.string(), conversation: savedConversationSchema })).optional(), runHistory: z.array(usage).optional(),
+  versions: z.array(z.object({ id, at: date, label: z.string(), runId: id.optional(), phase: z.enum(['basic', 'supplement']).optional(), conversation: savedConversationSchema })).optional(), runHistory: z.array(usage).optional(),
+  deletedAnalysisVersions: z.array(id).optional(),
   annotation: z.string().max(20_000).optional(), pinned: z.boolean().optional(), tags: z.array(z.string().max(30)).max(20).optional(), favorites: z.array(id).optional(),
   followups: z.record(id, z.object({ status: z.enum(['open', 'done', 'ignored']), note: z.string().max(2000), at: date })).optional() });
 const backupSchema = z.object({ format: z.literal('conversation-notes-backup'), version: z.literal(1), createdAt: date,

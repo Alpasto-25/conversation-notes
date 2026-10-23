@@ -5,6 +5,7 @@ import { AnalysisPlan } from './AnalysisPlan';
 import { AnalysisHistory } from './AnalysisHistory';
 import { UsageHistory } from './UsageHistory';
 import { ImportReview } from './ImportReview';
+import { ScreenshotImport } from './ScreenshotImport';
 import { NotebookInsights } from './NotebookInsights';
 import { AnalysisTimeline } from './AnalysisTimeline';
 import { parseChatAsync } from './parse-chat';
@@ -18,8 +19,7 @@ import { ShareDialog, type ShareDialogHandle } from "./ShareDialog";
 import { ChatMessage } from "./ChatMessage";
 import { SemanticDetail } from './SemanticDetail';
 import { SemanticSwitch } from './SemanticSwitch';
-import { analysisMode, type SemanticMode } from '../shared/analysis-mode';
-import { providerName } from '../shared/models';
+import { analysisMode, judgmentSelection, type SemanticMode } from '../shared/analysis-mode';
 import { IconButton } from "./IconButton";
 import { dismissNotebookDrag } from "./useNotebookDrag";
 import type { ShareSource } from "./share-content";
@@ -76,6 +76,7 @@ import {
   ArrowLeft,
   Search,
   ListChecks,
+  ScanText,
 } from "lucide-react";
 import { toMessages, mergeMessages } from "../shared/parser";
 import {
@@ -92,8 +93,7 @@ import {
 } from "../shared/types";
 import { exampleForRelation } from "../shared/fixtures";
 import { useAnalysis } from "./useAnalysis";
-import { ConversationUsage } from "./ConversationUsage";
-import { isMobile, isDesktop, isNative, getApiStatus, type ApiStatus } from "./platform";
+import { isMobile, isDesktop, isNative, getApiStatus, saveMobileConfig, type ApiStatus } from "./platform";
 import { MobileSettings } from "./MobileSettings";
 import { BillingNotice, ProviderHelp } from "./ProviderHelp";
 import { FirstRunGuide } from "./FirstRunGuide";
@@ -181,16 +181,18 @@ function Modal({
     </div>
   );
 }
-function AnalysisModeSelector({ mode, change, disabled, field = false, label, jevPlatform }: {
-  mode: SemanticMode; change: (mode: SemanticMode) => void; disabled: boolean; field?: boolean; label?: string; jevPlatform?: string;
+function AnalysisModeSelector({ mode, change, disabled, field = false, label }: {
+  mode: SemanticMode; change: (mode: SemanticMode) => void; disabled: boolean; field?: boolean; label?: string;
 }) {
   const name = label || (field ? '分析组合' : '分析方式');
-  // Say which platform actually judges, so a failure can be traced to it.
-  const jev = jevPlatform ? `Jev（${jevPlatform}）+ DeepSeek` : 'Jev + DeepSeek';
+  const jev = 'Jev 判断 + DeepSeek 文字解读';
   return <label className={field ? 'field analysis-mode-control' : 'scene-control model-control'}>
     <span>{name}</span><ToggleSelect className={field ? '' : 'scene-select model-select'} aria-label={name}
+      title={mode === 'deepseek' ? 'DeepSeek 判断与文字解读' : mode === 'openai-deepseek' ? 'OpenAI 判断 + DeepSeek 文字解读' : jev}
       value={mode} disabled={disabled} onChange={value => change(value as SemanticMode)}>
-      <option value="deepseek">仅 DeepSeek</option><option value="jev-deepseek">{jev}</option>
+      <option value="deepseek">{field ? 'DeepSeek 判断 + 文字解读' : '仅 DeepSeek'}</option>
+      <option value="jev-deepseek">{field ? jev : 'Jev + DS'}</option>
+      <option value="openai-deepseek">{field ? 'OpenAI 判断 + DeepSeek 文字解读' : 'OpenAI + DS'}</option>
     </ToggleSelect>
   </label>;
 }
@@ -204,10 +206,12 @@ export default function App() {
   const [appearanceOpen, setAppearanceOpen] = useState(false);
   const [backupOpen, setBackupOpen] = useState(false), [backupBusy, setBackupBusy] = useState(false), [backupScope, setBackupScope] = useState('all');
   const [usageOpen, setUsageOpen] = useState(false);
+  const [screenshotFiles, setScreenshotFiles] = useState<File[] | null>(null);
   const [analysisSettingsOpen, setAnalysisSettingsOpen] = useState(false);
   const [reanalyzeOpen, setReanalyzeOpen] = useState(false);
   const [analysisConfirm, setAnalysisConfirm] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [recordTab, setRecordTab] = useState<'usage' | 'results'>('usage');
+  const [recordVersion, setRecordVersion] = useState<string>();
   const [insightsOpen, setInsightsOpen] = useState(false);
   const [pendingNavigation, setPendingNavigation] = useState<{ notebookId: string; messageId?: string } | null>(null);
   const [analysisTargets, setAnalysisTargets] = useState<string[]>([]), [analysisSupplement, setAnalysisSupplement] = useState(false);
@@ -249,6 +253,7 @@ export default function App() {
   const importParsed = useMemo(() => selectedImport(parsed, importSelection), [parsed, importSelection]);
   const importMessages = useMemo(() => toMessages(importParsed, role), [importParsed, role]);
   const [apiInfo, setApiInfo] = useState<ApiStatus | null>(null);
+  const [modeSaving, setModeSaving] = useState(false);
   const [settingsSelection, setSettingsSelection] = useState<ModelSelection>();
   useEffect(() => { if (!settings) setSettingsSelection(undefined); }, [settings]);
   const [onboarding, setOnboarding] = useState(() => {
@@ -260,7 +265,7 @@ export default function App() {
     setOnboarding(false);
   };
   const canShowUpdatePrompt = ready && a.status !== "loading" && !switching &&
-    !menuOpen && !onboarding && !appearanceOpen && !backupOpen && !historyOpen && !updatesOpen && !settings && !analysisSettingsOpen && !reanalyzeOpen && !analysisConfirm && !pendingImportAnalysis && !importing && !detail &&
+    !menuOpen && !onboarding && !appearanceOpen && !backupOpen && !updatesOpen && !settings && !analysisSettingsOpen && !reanalyzeOpen && !analysisConfirm && !pendingImportAnalysis && !importing && !detail &&
     !libraryOpen && !editingNotebook && !editingMessage && !rangeOpen && !insightsOpen && !pendingNavigation && !trashOpen && !notebookDelete && !messageDelete && !movingNotes && !shareSource && !searchOpen && !overlap && !usageOpen;
   const installedUpdatePrompt = updates.showInstalledChanges && canShowUpdatePrompt;
   const updatePrompt = updates.showReminder && !updates.showInstalledChanges && canShowUpdatePrompt;
@@ -357,7 +362,6 @@ export default function App() {
       if (installedUpdatePrompt) { updates.acknowledgeInstalledChanges(); return true; }
       if (updatePrompt) { updates.snooze(); return true; }
       if (usageOpen) { setUsageOpen(false); return true; }
-      if (historyOpen) { setHistoryOpen(false); return true; }
       if (insightsOpen) { setInsightsOpen(false); return true; }
       if (pendingNavigation) { setPendingNavigation(null); return true; }
       if (searchOpen) { setSearchOpen(null); return true; }
@@ -403,8 +407,8 @@ export default function App() {
     return () => {
       delete window.__notebookBack;
     };
-  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, backupOpen, backupBusy, usageOpen, historyOpen, insightsOpen, pendingNavigation, searchOpen, analysisSettingsOpen, reanalyzeOpen, analysisConfirm, updatePrompt, installedUpdatePrompt, updates.snooze, updates.acknowledgeInstalledChanges, libraryOpen, editingNotebook, editingMessage, rangeOpen, trashOpen, notebookDelete, messageDelete, movingNotes, shareSource, closeMenu, reading.expanded, reading.close]);
-  const busy = a.status === "loading" || switching || importParsing,
+  }, [overlap, importing, settings, detail, onboarding, updatesOpen, appearanceOpen, backupOpen, backupBusy, usageOpen, insightsOpen, pendingNavigation, searchOpen, analysisSettingsOpen, reanalyzeOpen, analysisConfirm, updatePrompt, installedUpdatePrompt, updates.snooze, updates.acknowledgeInstalledChanges, libraryOpen, editingNotebook, editingMessage, rangeOpen, trashOpen, notebookDelete, messageDelete, movingNotes, shareSource, closeMenu, reading.expanded, reading.close]);
+  const busy = a.status === "loading" || switching || importParsing || modeSaving,
     ov = a.overview,
     value = ov?.affinity.value,
     quality = meanQuality(messages, a.lines);
@@ -587,8 +591,21 @@ export default function App() {
   const analysisSelection = apiInfo ? analysisMode(apiInfo, a.semanticEnabled, a.semanticMode) : null;
   const primaryAnalysis = analysisSelection?.primary;
   const selectedMode = analysisSelection?.selectedMode ?? a.semanticMode ?? 'deepseek';
-  // Resolve the Jev platform even while "仅 DeepSeek" is active, so the combo stays explicit.
-  const jevPlatform = providerName(apiInfo ? analysisMode(apiInfo, true, 'jev-deepseek').judge?.provider : '');
+  async function changeWorkflow(mode: SemanticMode) {
+    if (busy || !apiInfo) return;
+    const selection = judgmentSelection(apiInfo, mode);
+    const configured = apiInfo.profiles?.some(p => p.provider === selection.provider && p.configured)
+      || (apiInfo.configured && apiInfo.provider === selection.provider);
+    if (!configured) {
+      a.changeSemanticMode(mode); setSettingsSelection(selection); setSettings(true); return;
+    }
+    setModeSaving(true);
+    try {
+      if (isNative) setApiInfo(await saveMobileConfig(selection.provider, '', selection.model));
+      a.changeSemanticMode(mode);
+    } catch (error) { setNotice(error instanceof Error ? error.message : '模型切换失败，请重试。'); }
+    finally { setModeSaving(false); }
+  }
   return (
     <main className={`app${isDesktop ? " desktop-app" : ""}${reading.expanded ? " is-chat-reading" : ""}`}>
       <div ref={workspace} className="workspace">
@@ -736,6 +753,7 @@ export default function App() {
                   ? `${messages.length.toLocaleString()} 条消息`
                   : "从日常聊天到工作沟通，看见情绪、表达和下一步。"}
               </p>
+            </div>
               <div className="document-meta">
                 <label className="scene-control">
                   <span>分析场景</span>
@@ -753,16 +771,15 @@ export default function App() {
                     ))}
                   </ToggleSelect>
                 </label>
-                {a.semanticEnabled ? <AnalysisModeSelector mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !ready || !apiInfo} jevPlatform={jevPlatform} />
+                {a.semanticEnabled ? <AnalysisModeSelector mode={selectedMode} change={mode => void changeWorkflow(mode)} disabled={busy || !ready || !apiInfo} />
                   : isNative && <ModelSelector status={apiInfo} disabled={busy || !ready} changed={setApiInfo}
                     notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
-                <span className="save-badge">
+                <span className={`save-badge${storageError ? ' has-storage-error' : ''}`}>
                   <ShieldCheck size={13} />
                   {storageError ? "保存异常" : "仅在本机保存"}
                 </span>
                 <IconButton label="整理手记" className="organize-notebook" disabled={manageDisabled} onClick={() => void editNotebook()}><Pencil size={18} /></IconButton>
               </div>
-            </div>
             <button
               className="header-affinity"
               onClick={() => setDetail("overview")}
@@ -939,6 +956,7 @@ export default function App() {
                 }}
               />
               <IconButton label="导入文本文件" disabled={!ready || busy} onClick={() => fileInput.current?.click()}><Upload size={18} /></IconButton>
+              <IconButton label="识别聊天截图" disabled={!ready || busy || switching || !!storageError} onClick={() => setScreenshotFiles([])}><ScanText size={18} /></IconButton>
               <IconButton label="查看支持格式" onClick={() => setDetail("formats")}><FileText size={18} /></IconButton>
             </div>
             <textarea
@@ -950,6 +968,10 @@ export default function App() {
                   : "粘贴两人的对话，例如：我：内容 / 对方：内容…"
               }
               value={input}
+              onPaste={e => {
+                const files = [...e.clipboardData.files].filter(file => file.type.startsWith('image/'));
+                if (files.length && !busy && !storageError && ready) { e.preventDefault(); setScreenshotFiles(files); }
+              }}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === "Enter")
@@ -977,7 +999,7 @@ export default function App() {
                     <IconButton label="重新分析" disabled={busy || !!storageError || !ready} onClick={() => setReanalyzeOpen(true)}><RotateCcw size={18} /></IconButton>}
                   {!storageError && a.semanticEnabled && messages.some(m => m.sender === 'other' && a.lines[m.id]?.emotions) && <IconButton label="补充表达方式与潜台词" disabled={busy} onClick={() => requestAnalysis([], true)}><MessageCircle size={18} /></IconButton>}
                   {notebooks.active?.undo && <IconButton label={`撤销${notebooks.active.undo.label}`} disabled={manageDisabled} onClick={() => void notebooks.undoMessages().then(note => { if (note) setNotice('已撤销最近一次消息修改，原文和各场景结果已恢复。'); })}><ArrowLeft size={18} /></IconButton>}
-                  {(a.analysisUsage || a.semanticUsage || a.failedAnalysisUsage) && <IconButton label="分析用量" onClick={() => setUsageOpen(true)}><BarChart3 size={18} /></IconButton>}
+                  {(a.analysisUsage || a.semanticUsage || a.failedAnalysisUsage || notebooks.runHistory.length > 0 || notebooks.versions.length > 0) && <IconButton label="分析记录与用量" onClick={() => { setRecordTab('usage'); setRecordVersion(undefined); setUsageOpen(true); }}><BarChart3 size={18} /></IconButton>}
                 </div>
               <button type="button" className="send" disabled={!input.trim() || busy || !!storageError || !ready} onClick={() => prepare(input)}><Sparkles size={19} /><span>预览导入</span></button>
             </div>
@@ -1028,7 +1050,7 @@ export default function App() {
               ))}
             </ToggleSelect>
           </label>
-          {a.semanticEnabled ? <AnalysisModeSelector field label="本次分析组合" mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !apiInfo} jevPlatform={jevPlatform} />
+          {a.semanticEnabled ? <AnalysisModeSelector field label="本次分析组合" mode={selectedMode} change={mode => void changeWorkflow(mode)} disabled={busy || !apiInfo} />
             : isNative && <ModelSelector field status={apiInfo} disabled={busy} changed={setApiInfo} pendingChanged={setImportModelSaving}
               notice={setNotice} configure={selection => { setSettingsSelection(selection); setSettings(true); }} />}
           <div className="role-options">
@@ -1111,8 +1133,8 @@ export default function App() {
         <Modal title="API 配置" close={() => setSettings(false)}>
           <SemanticSwitch enabled={a.semanticEnabled} change={a.changeSemanticEnabled} disabled={busy} />
           {a.semanticEnabled && <>
-            <AnalysisModeSelector mode={selectedMode} change={a.changeSemanticMode} disabled={busy || !apiInfo} field jevPlatform={jevPlatform} />
-            <p>{selectedMode === 'deepseek' ? '基础分析、表达方式判断和潜台词均由 DeepSeek 完成。' : 'Jev 完成判断，DeepSeek 根据判断写潜台词。'} 切换只影响后续分析，已有结果保留。</p>
+            <AnalysisModeSelector mode={selectedMode} change={mode => void changeWorkflow(mode)} disabled={busy || !apiInfo} field />
+            <p>{selectedMode === 'deepseek' ? '基础分析、表达方式判断和文字解读均由 DeepSeek 完成。' : `${selectedMode === 'openai-deepseek' ? 'OpenAI Decisions' : 'Jev'}完成判断，DeepSeek 根据判断解释策略和潜台词。`} 切换只影响后续分析，已有结果保留。</p>
             {analysisSelection?.error && <p role="status">{analysisSelection.error}</p>}
           </>}
           {isNative && <MobileSettings status={apiInfo} changed={setApiInfo} selection={settingsSelection} disabled={busy}
@@ -1130,6 +1152,12 @@ export default function App() {
           )}
         </Modal>
       )}
+      {screenshotFiles && <Modal title="识别聊天截图" close={() => setScreenshotFiles(null)}>
+        <ScreenshotImport initialFiles={screenshotFiles} status={apiInfo}
+          configure={provider => { setScreenshotFiles(null); setSettingsSelection({ provider, model: provider === 'deepseek' ? 'deepseek-flash' : 'openai/gpt-6-luna-decisions', purpose: 'screenshot' }); setSettings(true); }}
+          recordUsage={usage => notebooks.recordUsage(usage, notebooks.active!.id)}
+          imported={text => { setScreenshotFiles(null); prepare(text, true, '截图聊天'); }} />
+      </Modal>}
       {analysisSettingsOpen && (
         <Modal title="分析设置" close={() => setAnalysisSettingsOpen(false)}>
           <label className="field">
@@ -1185,13 +1213,27 @@ export default function App() {
             ；分析片段会发送给所选模型。
           </p>
           <button className="secondary" onClick={() => { setAnalysisSettingsOpen(false); setOnboarding(true); }}>使用引导</button>
-          <button className="secondary" disabled={manageDisabled} onClick={() => { setAnalysisSettingsOpen(false); setHistoryOpen(true); }}>分析版本历史</button>
+          <button className="secondary" disabled={manageDisabled} onClick={() => { setAnalysisSettingsOpen(false); setRecordTab('results'); setRecordVersion(undefined); setUsageOpen(true); }}>结果历史与恢复</button>
         </Modal>
       )}
       {updatesOpen && <Modal title="版本与更新" close={() => setUpdatesOpen(false)}><UpdatesPage updates={updates} /></Modal>}
-      {usageOpen && <Modal title="分析用量" close={() => setUsageOpen(false)}>
-        <ConversationUsage primary={a.analysisUsage} semantic={a.semanticUsage} failed={a.failedAnalysisUsage} primaryRestored={a.usageRestored} semanticRestored={a.semanticUsageRestored} />
-        <UsageHistory runs={notebooks.runHistory} />
+      {usageOpen && <Modal title="分析记录" close={() => setUsageOpen(false)}>
+        <div className="records-tabs" role="tablist" aria-label="分析记录分类">
+          <button role="tab" aria-selected={recordTab === 'usage'} onClick={() => setRecordTab('usage')}>每次用量</button>
+          <button role="tab" aria-selected={recordTab === 'results'} onClick={() => { setRecordVersion(undefined); setRecordTab('results'); }}>结果历史与恢复</button>
+        </div>
+        {recordTab === 'usage' ? <UsageHistory runs={notebooks.runHistory} versions={notebooks.versions} deletedIds={notebooks.active?.deletedAnalysisVersions} viewResult={(id, notebookId) => { void (async () => {
+          if (notebookId && notebookId !== notebooks.active?.id) { if (busy || !await notebooks.select(notebookId)) return; }
+          setRecordVersion(id); setRecordTab('results');
+        })(); }} />
+          : <>
+            <AnalysisHistory key={recordVersion || 'latest'} versions={notebooks.versions} current={notebooks.snapshot()} initialId={recordVersion} locked={busy} restore={async id => {
+              if (await notebooks.restoreVersion(id)) { setUsageOpen(false); setNotice('历史分析已恢复，历史用量保留，没有调用模型。'); }
+            }} openCopy={async id => { if (await notebooks.openVersionCopy(id)) { setUsageOpen(false); setNotice('已打开历史结果副本，没有调用模型。'); } }} remove={async id => {
+              if (!await notebooks.deleteVersion(id)) throw new Error('删除未能保存，原历史结果已保留。请重试保存后再操作。');
+            }} />
+            <details className="usage-technical"><summary><ChevronRight size={16} />评分变化</summary><AnalysisTimeline points={[...notebooks.versions.flatMap(v => v.conversation.trend), ...a.trend]} /></details>
+          </>}
       </Modal>}
       {reanalyzeOpen && <Modal title="重新分析当前对话" close={() => setReanalyzeOpen(false)}>
         <p>将使用 {primaryAnalysis?.model || '当前模型'} 重新分析当前场景，聊天原文保留。</p>
@@ -1229,12 +1271,6 @@ export default function App() {
           setSearchSession({ hits, query, index: hits.indexOf(hit) }); setSearchOpen(null); void navigateMessage(hit);
         }} />
         <p className="folder-help">Ctrl+F 查找当前手记，Ctrl+Shift+F 搜索全部，F3 / Shift+F3 切换命中。</p>
-      </Modal>}
-      {historyOpen && <Modal title="分析版本历史" close={() => setHistoryOpen(false)}>
-        <AnalysisHistory versions={notebooks.active?.versions ?? []} current={notebooks.snapshot()} restore={async id => {
-          if (await notebooks.restoreVersion(id)) { setHistoryOpen(false); setNotice('历史分析已恢复，历史用量保留，没有调用模型。'); }
-        }} />
-        <AnalysisTimeline points={[...(notebooks.active?.versions ?? []).flatMap(v => v.conversation.trend), ...a.trend]} />
       </Modal>}
       {insightsOpen && notebooks.active && <Modal title="我的手记与待跟进" close={() => setInsightsOpen(false)}>
         <NotebookInsights note={{ ...notebooks.active, conversation: notebooks.snapshot() }} save={notebooks.savePersonal} locate={id => { setInsightsOpen(false); locateCurrentMessage(id); }} />

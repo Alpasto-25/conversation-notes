@@ -23,7 +23,7 @@ export function FirstRunGuide({ finish, configure }: { finish: () => void; confi
           <KeyRound className="guide-icon" size={30} />
           <h3>使用你自己申请的 API Key</h3>
           <ol className="guide-instructions">
-            <li>在设置中选择 Jev 平台或 DeepSeek Flash。</li>
+            <li>在设置中选择 Jev、OpenAI Decisions（OpenRouter）或 DeepSeek Flash。</li>
             <li>在对应平台官网创建 Key，并按需购买额度。</li>
             <li>粘贴 Key 并保存；应用会在本机加密保存。</li>
             <li>测试连接会消耗额度。不同平台的 Key 不可混用。</li>
@@ -36,6 +36,7 @@ export function FirstRunGuide({ finish, configure }: { finish: () => void; confi
           <h3>导入一段双方同意分享的对话</h3>
           <ol className="guide-instructions">
             <li>选好场景，粘贴“我：内容 / 对方：内容”，或导入 UTF-8 文本。</li>
+            <li>电脑版也可点击输入区的截图识别图标；识别会产生视觉模型用量，结果可先校对。</li>
             <li>确认哪个昵称代表你，再开始分析。</li>
             <li>手记可分类、移动和多选管理；重新打开会恢复已有分析。</li>
             <li>示例分析也会消耗 API 额度。</li>

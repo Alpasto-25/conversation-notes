@@ -32,5 +32,6 @@ export function planAnalysis(messages: Message[], relation: Relation, saved: Sav
   return { model: identity.model || '尚未配置', error: mode.error || (!mode.primary.configured ? '请先配置分析模型。' : ''),
     total: messages.length, newMessages: append ? messages.length - saved.messages.length : messages.length,
     retained: append ? Object.keys(lines).length : 0, batches: stages.length, semanticStages, fee,
-    priceDate: DEEPSEEK_PRICE_DATE, overviewCount: overview.messages.length, hasJev: !deepseek || !!mode.judge };
+    priceDate: DEEPSEEK_PRICE_DATE, overviewCount: overview.messages.length, hasJev: !deepseek || !!mode.judge,
+    hasOpenAI: !!mode.primary.model?.includes('gpt-') };
 }

@@ -3,6 +3,9 @@ import { ProviderError, analysisFailureDetails } from "../shared/provider-contra
 import { evaluateWithDeepseekRepair, evaluateCausalDeepseek, nativeDeepseekPayload, type DeepseekRequest } from "../shared/deepseek";
 import { isOfficialProviderUrl } from "../shared/provider-guides";
 import { providerName } from "../shared/models";
+import { normalizeOpenRouterResult, screenshotInputSchema, SCREENSHOT_PROVIDERS, parseScreenshotText, type ScreenshotProvider } from '../shared/openrouter';
+import { validateReturnedUsage } from '../shared/provider-contract';
+import type { AnalysisUsage } from '../shared/usage';
 import { RELEASES_URL, QUARK_DOWNLOAD_URL, type BuildInfo } from "../shared/updates";
 import { analyzeSemantics, semanticFailureDetails, semanticGuidanceSchema, type SemanticRequest } from '../shared/semantics';
 import { analyzeJevSemantics } from '../shared/semantic-judgment';
@@ -102,7 +105,7 @@ function nativeCall<T>(
     pending.set(id, {
       resolve: (value) => {
         finish();
-        resolve(value as T);
+        resolve((method === 'evaluate' ? normalizeOpenRouterResult(value) : value) as T);
       },
       reject: (error) => {
         finish();
@@ -127,6 +130,38 @@ export async function getApiStatus(): Promise<ApiStatus> {
   const response = await fetch("/api/health");
   if (!response.ok) throw new Error("本机服务未响应");
   return response.json();
+}
+export async function recognizeScreenshot(image: string, selfSide: 'right' | 'left', signal: AbortSignal, provider: ScreenshotProvider = 'openrouter'): Promise<{
+  usage: AnalysisUsage; messages?: { sender: 'self' | 'other'; text: string }[]; warnings?: string[]; error?: string;
+}> {
+  const payload = screenshotInputSchema.parse({ image, selfSide, provider });
+  const started = performance.now(), started_at = new Date().toISOString();
+  const base = { purpose: 'screenshot' as const, provider, model: SCREENSHOT_PROVIDERS[provider].model,
+    run_id: crypto.randomUUID(), started_at, local_targets: 0 };
+  let usage: AnalysisUsage;
+  let raw: any;
+  try {
+    if (isNative) raw = await nativeCall('recognizeScreenshot', payload, signal, 90000);
+    else {
+      const response = await fetch('/api/screenshot', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal });
+      if (!response.ok) throw new ProviderError(response.status, (await response.json()).error || '截图识别失败。');
+      raw = await response.json();
+    }
+    const normalized = (provider === 'openrouter' ? normalizeOpenRouterResult(raw) : raw) as any;
+    const tokens = validateReturnedUsage({ ...normalized?.usage, input_tokens: raw?.usage?.prompt_tokens,
+      output_tokens: raw?.usage?.completion_tokens });
+    usage = { ...base, ...tokens, ...(typeof raw?.model === 'string' && raw.model.length <= 80 ? { model: raw.model } : {}),
+      requests: tokens.requests ?? 1, status: 'complete', elapsed_ms: Math.round(performance.now() - started), finished_at: new Date().toISOString() };
+  } catch (error) {
+    usage = { ...base, status: signal.aborted ? 'paused' : 'partial', input_tokens: 0, output_tokens: 0, requests: 0, unreported_batches: 1,
+      elapsed_ms: Math.round(performance.now() - started), finished_at: new Date().toISOString() };
+    return { usage, error: signal.aborted ? '已停止识别；未返回的用量请以平台账单为准。' : error instanceof Error ? error.message : '截图识别失败。' };
+  }
+  try {
+    if (raw?.choices?.[0]?.finish_reason !== 'stop') throw new Error('截图内容过长或识别被中断；未导入不完整记录，请分段截图后重试。');
+    const result = parseScreenshotText(raw.choices[0].message.content);
+    return { usage, ...result };
+  } catch (error) { return { usage: { ...usage, status: 'partial' }, error: error instanceof Error ? error.message : '截图识别返回不完整。' }; }
 }
 export function saveMobileConfig(provider: string, apiKey: string, model?: string, activate = true) {
   return nativeCall<ApiStatus>("configure", { provider, apiKey, model, activate });
